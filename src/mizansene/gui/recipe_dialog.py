@@ -211,6 +211,12 @@ class RecipeDialog(QDialog):
         self.progress.setText(f"Imported/updated {count} YouTube recipes.")
         self.reload()
 
+    def closeEvent(self, event):
+        if self.import_worker and self.import_worker.isRunning():
+            self.import_worker.requestInterruption()
+            self.import_worker.wait(3000)
+        super().closeEvent(event)
+
     def import_failed(self, message: str):
         self.progress.setText("YouTube import failed.")
         QMessageBox.warning(self, "Recipe import", message)
