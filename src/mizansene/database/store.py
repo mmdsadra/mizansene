@@ -146,6 +146,13 @@ class ProductStore:
             session.flush()
             return int(row.id)
 
+    def recipe_source_urls(self) -> set[str]:
+        with self.Session() as session:
+            rows = session.scalars(
+                select(RecipeRow.source_url).where(RecipeRow.source_url.is_not(None))
+            ).all()
+            return {url for url in rows if url}
+
     def add_inventory_item(
         self,
         name: str,
