@@ -125,3 +125,21 @@ def test_explicit_discount_price_is_preferred():
     assert product.price == 75000
     assert product.original_price == 90000
     assert product.discount_percent == 16.7
+
+
+
+def test_discounted_price_is_used_when_api_returns_both_prices():
+    payload = {
+        "data": [
+            {
+                "id": 22,
+                "name": "روغن",
+                "price": 100000,
+                "discountedPrice": 80000,
+            }
+        ]
+    }
+    product = extract_products(payload, store_id=1)[0]
+    assert product.price == 80000
+    assert product.original_price == 100000
+    assert product.discount_percent == 20.0
