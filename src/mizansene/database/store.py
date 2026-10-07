@@ -96,6 +96,10 @@ class ProductStore:
         with self.Session.begin() as session:
             session.add(SearchRow(query=query.strip()))
 
+    def clear_search_history(self) -> None:
+        with self.Session.begin() as session:
+            session.query(SearchRow).delete()
+
     def recent_searches(self, limit: int = 10) -> list[str]:
         with self.Session() as session:
             rows = session.scalars(
