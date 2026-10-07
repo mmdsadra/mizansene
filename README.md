@@ -2,19 +2,22 @@
 
 **Mizansene** is a local-first desktop food shopping assistant for Okala.
 
-Type a food, ingredient, or recipe name. Mizansene searches Okala food categories,
-ranks matching products, keeps local search/product history, and gives you a direct
-Okala link.
+Type a food, ingredient, or recipe name. Mizansene discovers nearby Okala stores from
+coordinates entered in the GUI, lets you select the exact store, searches its
+quantity-filtered inventory, ranks matching products, keeps local search/product history,
+and gives you a direct Okala link.
 
 ## MVP
 
 - PySide6 desktop GUI
+- GUI location panel with persistent latitude/longitude
+- Nearby Okala store discovery + explicit store selection
+- Quantity-filtered store inventory search
 - Okala gateway client
 - Request throttling + JSON cache
 - SQLite product/search history
 - Persian/English input
 - Product image + price + Okala link
-- Search across major food categories when a store ID is supplied
 - Unit tests + GitHub Actions
 
 ## Setup
@@ -28,23 +31,20 @@ pip install -e '.[dev]'
 mizansene
 ```
 
-Environment variables:
+Optional environment variable:
 
 ```bash
 export OKALA_TOKEN='your-current-token'
-export OKALA_STORE_ID='1234'
-export OKALA_LAT='YOUR_LATITUDE'
-export OKALA_LON='YOUR_LONGITUDE'
 ```
 
-Do not leave the location unset if you want nearby-store discovery. Mizansene deliberately
-does not use a Tehran fallback: it uses the coordinates you provide, then asks Okala for
-nearby stores and sorts stores by the distance reported by the API.
+You do **not** need to export latitude, longitude, or a store ID. Open Mizansene,
+enter your latitude and longitude in the **Location** panel, click **Save location**,
+then click **Find nearby stores**. The closest returned store is selected automatically,
+and you can change the selection before searching.
 
-For reliable inventory results, select a discovered nearby store (or enter a known store ID)
-before searching. Search results are filtered for explicit out-of-stock signals and only
-products with a positive textual match are returned; unrelated catalog entries are not used
-to fill the result list.
+Search uses Okala's quantity-filtered store search rather than treating a generic catalog
+response as in-stock inventory. Products with explicit out-of-stock signals are also
+discarded.
 
 ## Architecture
 
@@ -52,6 +52,7 @@ to fill the result list.
 GUI
  └── SearchWorker
       ├── OkalaClient ── Okala gateway
+      ├── quantity-filtered store inventory
       ├── product normalization/ranking
       └── ProductStore ── SQLite
 ```
