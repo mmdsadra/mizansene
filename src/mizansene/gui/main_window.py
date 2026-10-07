@@ -255,6 +255,7 @@ class MapWidget(QWidget):
         self.center_world = _latlon_to_world(lat, lon, self.zoom)
         self.tile_worker = None
         self.drag_start = None
+        self.press_pos = None
         self._load_tiles()
 
     def _load_tiles(self):
@@ -290,6 +291,7 @@ class MapWidget(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.drag_start = event.position()
+            self.press_pos = event.position()
             self.setCursor(Qt.ClosedHandCursor)
 
     def mouseMoveEvent(self, event):
@@ -307,9 +309,16 @@ class MapWidget(QWidget):
         if event.button() != Qt.LeftButton:
             return
         self.setCursor(Qt.ArrowCursor)
-        if self.drag_start is not None:
-            self.locationSelected.emit(self.lat, self.lon)
+        if self.press_pos is not None and self.press_pos.distanceToPoint(event.position()) < 4:
+            origin_x = self.center_world[0] * 256 - self.width() / 2
+            origin_y = self.center_world[1] * 256 - self.height() / 2
+            world_x = (origin_x + event.position().x()) / 256
+            world_y = (origin_y + event.position().y()) / 256
+            self.lat, self.lon = _world_to_latlon(world_x, world_y, self.zoom)
+            self.center_world = _latlon_to_world(self.lat, self.lon, self.zoom)
+        self.locationSelected.emit(self.lat, self.lon)
         self.drag_start = None
+        self.press_pos = None
         self._load_tiles()
 
     def paintEvent(self, _event):
@@ -585,9 +594,11 @@ class MainWindow(QMainWindow):
         self.load_more.setVisible(self.loaded_category_count < len(self.search_categories))
 
     def _render_products(self, products):
-        self.results.clear()
-        self.current_products = {product.id: product for product in products}
         for product in products:
+            self.current_products[product.id] = product
+        merged = list(self.current_products.values())
+        self.results.clear()
+        for product in merged[:30]:
             item = QListWidgetItem()
             widget = ProductItem(product)
             item.setSizeHint(widget.sizeHint())
