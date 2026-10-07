@@ -3,7 +3,9 @@ from __future__ import annotations
 import webbrowser
 
 import httpx
-from PySide6.QtCore import QSettings, Qt, QThread, Signal
+from PySide6.QtCore import QSettings, QObject, Qt, QThread, Signal, Slot
+from PySide6.QtWebChannel import QWebChannel
+from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -187,6 +189,17 @@ class ProductItem(QWidget):
         layout.addLayout(text)
 
 
+
+class LocationBridge(QObject):
+    def __init__(self, window):
+        super().__init__()
+        self.window = window
+
+    @Slot(float, float)
+    def locationSelected(self, lat: float, lon: float):
+        self.window.set_map_location(lat, lon)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -195,6 +208,7 @@ class MainWindow(QMainWindow):
         self.store = ProductStore(DB_PATH)
         self.worker = None
         self.store_worker = None
+        self.current_products = {}
         self.settings = QSettings("Mizansene", "Mizansene")
 
         root = QWidget()
@@ -205,13 +219,26 @@ class MainWindow(QMainWindow):
         layout.addWidget(title)
 
         location_box = QGroupBox("Location")
-        location_layout = QFormLayout(location_box)
+        location_layout = QVBoxLayout(location_box)
         self.latitude = QLineEdit(str(self.settings.value("latitude", "")))
         self.longitude = QLineEdit(str(self.settings.value("longitude", "")))
-        self.latitude.setPlaceholderText("e.g. 32.6613")
-        self.longitude.setPlaceholderText("e.g. 51.6804")
-        location_layout.addRow("Latitude:", self.latitude)
-        location_layout.addRow("Longitude:", self.longitude)
+        self.latitude.setPlaceholderText("Latitude, e.g. 32.6613")
+        self.longitude.setPlaceholderText("Longitude, e.g. 51.6804")
+
+        coordinate_row = QHBoxLayout()
+        coordinate_row.addWidget(self.latitude)
+        coordinate_row.addWidget(self.longitude)
+        location_layout.addLayout(coordinate_row)
+
+        self.map = QWebEngineView()
+        self.map.setMinimumHeight(280)
+        self.map_bridge = LocationBridge(self)
+        self.map_channel = QWebChannel(self.map.page())
+        self.map_channel.registerObject("bridge", self.map_bridge)
+        self.map.page().setWebChannel(self.map_channel)
+        self.map.setHtml(self._map_html(), baseUrl="https://localhost/")
+        location_layout.addWidget(self.map)
+
         location_buttons = QHBoxLayout()
         save_location = QPushButton("Save location")
         save_location.clicked.connect(self.save_location)
@@ -219,7 +246,7 @@ class MainWindow(QMainWindow):
         find_stores = QPushButton("Find nearby stores")
         find_stores.clicked.connect(self.discover_stores)
         location_buttons.addWidget(find_stores)
-        location_layout.addRow(location_buttons)
+        location_layout.addLayout(location_buttons)
         layout.addWidget(location_box)
 
         row = QHBoxLayout()
@@ -264,6 +291,50 @@ class MainWindow(QMainWindow):
         self.results = QListWidget()
         layout.addWidget(self.results)
         self.setCentralWidget(root)
+
+    def _map_html(self) -> str:
+        saved_lat = self.settings.value("latitude", 35.805851)
+        saved_lon = self.settings.value("longitude", 51.431311)
+        return f"""
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>html,body,#map{{height:100%;margin:0}}</style>
+</head>
+<body>
+<div id="map"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script>
+new QWebChannel(qt.webChannelTransport, function(channel) {{
+    window.bridge = channel.objects.bridge;
+    const lat = {float(saved_lat)};
+    const lon = {float(saved_lon)};
+    const map = L.map('map').setView([lat, lon], 13);
+    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+    }}).addTo(map);
+    let marker = L.marker([lat, lon]).addTo(map);
+    map.on('click', function(e) {{
+        marker.setLatLng(e.latlng);
+        window.bridge.locationSelected(e.latlng.lat, e.latlng.lng);
+    }});
+}});
+</script>
+</body>
+</html>
+"""
+
+    def set_map_location(self, lat: float, lon: float):
+        self.latitude.setText(f"{lat:.6f}")
+        self.longitude.setText(f"{lon:.6f}")
+        self.settings.setValue("latitude", lat)
+        self.settings.setValue("longitude", lon)
+        self.status.setText(f"Map location selected: {lat:.6f}, {lon:.6f}")
 
     def save_location(self):
         try:
@@ -385,17 +456,28 @@ class MainWindow(QMainWindow):
         self.status.setText(f"Searching store {store_id} for available products…")
         self.results.clear()
         self.worker = SearchWorker(query, store_id)
+        self.worker.batch.connect(self.show_batch)
         self.worker.finished.connect(self.show_results)
         self.worker.failed.connect(self.show_error)
         self.worker.start()
 
+    def show_batch(self, products):
+        self._render_products(products, clear=True)
+        self.status.setText(f"Loading… {len(products)} matching products found so far.")
+
     def show_results(self, products):
-        self.results.clear()
+        self._render_products(products, clear=True)
         if not products:
             self.status.setText("No matching available products found in this store.")
             return
         self.status.setText(f"Found {len(products)} available matches.")
         self.store.save_products(products)
+
+    def _render_products(self, products, *, clear: bool):
+        if clear:
+            self.results.clear()
+        self.current_products = {product.id: product for product in products}
+        self.results.clear()
         for product in products:
             item = QListWidgetItem()
             widget = ProductItem(product)
