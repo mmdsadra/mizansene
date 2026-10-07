@@ -189,16 +189,97 @@ class ProductItem(QWidget):
 
 
 
-class LocationBridge(QObject):
-    def __init__(self, window):
+class MapTileWorker(QThread):
+    tiles_ready = Signal(object)
+
+    def __init__(self, lat: float, lon: float, zoom: int = 13):
         super().__init__()
-        self.window = window
+        self.lat, self.lon, self.zoom = lat, lon, zoom
 
-    @Slot(float, float)
-    def locationSelected(self, lat: float, lon: float):
-        self.window.set_map_location(lat, lon)
+    def run(self):
+        center_x, center_y = _latlon_to_world(self.lat, self.lon, self.zoom)
+        tiles = {}
+        max_tile = 2**self.zoom
+        tx0, ty0 = math.floor(center_x) - 2, math.floor(center_y) - 2
+        client = httpx.Client(timeout=8, headers={'User-Agent': 'Mizansene/0.1'})
+        try:
+            for tx in range(tx0, tx0 + 5):
+                for ty in range(ty0, ty0 + 5):
+                    if ty < 0 or ty >= max_tile:
+                        continue
+                    url = f'https://tile.openstreetmap.org/{self.zoom}/{tx % max_tile}/{ty}.png'
+                    response = client.get(url)
+                    response.raise_for_status()
+                    pixmap = QPixmap()
+                    if pixmap.loadFromData(response.content):
+                        tiles[(tx, ty)] = pixmap
+        except httpx.HTTPError:
+            tiles = {}
+        finally:
+            client.close()
+        self.tiles_ready.emit({'tiles': tiles, 'center_px': (center_x * 256, center_y * 256)})
 
 
+def _latlon_to_world(lat: float, lon: float, zoom: int) -> tuple[float, float]:
+    lat = max(-85.05112878, min(85.05112878, lat))
+    scale = 2**zoom
+    x = (lon + 180.0) / 360.0 * scale
+    lat_rad = math.radians(lat)
+    y = (1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * scale
+    return x, y
+
+
+def _world_to_latlon(x: float, y: float, zoom: int) -> tuple[float, float]:
+    scale = 2**zoom
+    lon = x / scale * 360.0 - 180.0
+    n = math.pi - 2.0 * math.pi * y / scale
+    return math.degrees(math.atan(math.sinh(n))), lon
+
+
+class MapWidget(QWidget):
+    locationSelected = Signal(float, float)
+
+    def __init__(self, lat: float, lon: float, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(280)
+        self.zoom, self.lat, self.lon = 13, lat, lon
+        self.tiles, self.center_px, self.tile_worker = {}, (0, 0), None
+        self.load_location(lat, lon)
+
+    def load_location(self, lat: float, lon: float):
+        self.lat, self.lon, self.tiles = lat, lon, {}
+        self.update()
+        self.tile_worker = MapTileWorker(lat, lon, self.zoom)
+        self.tile_worker.tiles_ready.connect(self._tiles_loaded)
+        self.tile_worker.start()
+
+    def _tiles_loaded(self, result):
+        self.tiles, self.center_px = result['tiles'], result['center_px']
+        self.update()
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), Qt.lightGray)
+        if not self.tiles:
+            painter.drawText(self.rect(), Qt.AlignCenter, 'Loading map…')
+            return
+        origin_x = self.center_px[0] - self.width() / 2
+        origin_y = self.center_px[1] - self.height() / 2
+        for (tx, ty), pixmap in self.tiles.items():
+            painter.drawPixmap(int(tx * 256 - origin_x), int(ty * 256 - origin_y), pixmap)
+        marker_x, marker_y = self.center_px[0] - origin_x, self.center_px[1] - origin_y
+        painter.setBrush(Qt.red)
+        painter.drawEllipse(int(marker_x - 6), int(marker_y - 6), 12, 12)
+        painter.drawText(12, self.height() - 12, 'Click the map to choose a location')
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.LeftButton:
+            return
+        origin_x = self.center_px[0] - self.width() / 2
+        origin_y = self.center_px[1] - self.height() / 2
+        lat, lon = _world_to_latlon((origin_x + event.position().x()) / 256, (origin_y + event.position().y()) / 256, self.zoom)
+        self.load_location(lat, lon)
+        self.locationSelected.emit(lat, lon)
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
