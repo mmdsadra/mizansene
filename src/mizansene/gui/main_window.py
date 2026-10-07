@@ -568,8 +568,16 @@ class MainWindow(QMainWindow):
                 self.map.set_center(*location, emit=False)
 
     def open_recipes(self):
-        dialog = RecipeDialog(self.store, self)
+        dialog = RecipeDialog(
+            self.store,
+            self,
+            search_callback=self.search_from_recipe,
+        )
         dialog.exec()
+
+    def search_from_recipe(self, ingredient: str):
+        self.search.setText(ingredient)
+        self.start_search()
 
     def save_location(self):
         location = self.location_values()
