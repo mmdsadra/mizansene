@@ -41,11 +41,12 @@ class RecipeImportWorker(QThread):
 
 
 class RecipeDialog(QDialog):
-    def __init__(self, store: ProductStore, parent=None):
+    def __init__(self, store: ProductStore, parent=None, search_callback=None):
         super().__init__(parent)
         self.store = store
         self.store.ensure_seed_recipes()
         self.current_id: int | None = None
+        self.search_callback = search_callback
         self.import_worker: RecipeImportWorker | None = None
         self.setWindowTitle("Recipe notebook")
         self.resize(900, 620)
@@ -93,6 +94,9 @@ class RecipeDialog(QDialog):
         open_source = QPushButton("Open source")
         open_source.clicked.connect(self.open_source)
         actions.addWidget(open_source)
+        shopping_button = QPushButton("Smart shopping")
+        shopping_button.clicked.connect(self.smart_shopping)
+        actions.addWidget(shopping_button)
         import_button = QPushButton("Import Yummy Gastronomy")
         import_button.clicked.connect(self.import_yummy)
         actions.addWidget(import_button)
@@ -169,10 +173,34 @@ class RecipeDialog(QDialog):
         if url:
             webbrowser.open(url)
 
+    def smart_shopping(self):
+        raw = [line.strip() for line in self.ingredients.toPlainText().splitlines()]
+        ingredients = [line for line in raw if line and len(line) > 1]
+        if not ingredients:
+            QMessageBox.information(
+                self,
+                "Smart shopping",
+                "This recipe has no ingredients yet.",
+            )
+            return
+        suggestions = "\n".join(f"☐ {item}" for item in ingredients)
+        box = QMessageBox(self)
+        box.setWindowTitle("Smart shopping list")
+        box.setText("Ingredients detected from this recipe:")
+        box.setDetailedText(suggestions)
+        if self.search_callback:
+            search = box.addButton("Search first ingredient", QMessageBox.AcceptRole)
+            box.exec()
+            if box.clickedButton() is search:
+                self.search_callback(ingredients[0])
+        else:
+            box.setInformativeText(suggestions)
+            box.exec()
+
     def import_yummy(self):
         if self.import_worker and self.import_worker.isRunning():
             return
-        self.progress.setText("Starting YouTube import…")
+        self.progress.setText("Importing channel index only. Full descriptions require YouTube access.")
         self.import_worker = RecipeImportWorker(self.store)
         self.import_worker.progress.connect(self.progress.setText)
         self.import_worker.finished.connect(self.import_finished)
