@@ -44,6 +44,7 @@ class RecipeDialog(QDialog):
     def __init__(self, store: ProductStore, parent=None):
         super().__init__(parent)
         self.store = store
+        self.store.ensure_seed_recipes()
         self.current_id: int | None = None
         self.import_worker: RecipeImportWorker | None = None
         self.setWindowTitle("Recipe notebook")
