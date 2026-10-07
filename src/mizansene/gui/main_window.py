@@ -78,7 +78,9 @@ class StoreWorker(QThread):
 
     def run(self):
         if OKALA_LAT is None or OKALA_LON is None:
-            self.failed.emit("Set OKALA_LAT and OKALA_LON to your location before finding nearby stores.")
+            self.failed.emit(
+                "Set OKALA_LAT and OKALA_LON to your location before finding nearby stores."
+            )
             return
         client = OkalaClient(token=OKALA_TOKEN, cache_dir=CACHE_DIR)
         try:
@@ -212,7 +214,11 @@ class MainWindow(QMainWindow):
             return
 
         if store_id is None:
-            QMessageBox.information(self, "Choose a store", "Find nearby stores and select a store first, or enter an Okala store ID.")
+            QMessageBox.information(
+                self,
+                "Choose a store",
+                "Find nearby stores and select a store first, or enter an Okala store ID.",
+            )
             return
 
         self.store.add_search(query)
