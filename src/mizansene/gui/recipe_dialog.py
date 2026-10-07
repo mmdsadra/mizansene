@@ -25,15 +25,17 @@ class RecipeImportWorker(QThread):
     finished = Signal(int)
     failed = Signal(str)
 
-    def __init__(self, store: ProductStore):
+    def __init__(self, store: ProductStore, full_metadata: bool = False):
         super().__init__()
         self.store = store
+        self.full_metadata = full_metadata
 
     def run(self):
         try:
             count = import_yummy_gastronomy(
                 self.store.upsert_recipe,
                 progress=self.progress.emit,
+                full_metadata=self.full_metadata,
             )
             self.finished.emit(count)
         except Exception as exc:
@@ -100,6 +102,9 @@ class RecipeDialog(QDialog):
         import_button = QPushButton("Import Yummy Gastronomy")
         import_button.clicked.connect(self.import_yummy)
         actions.addWidget(import_button)
+        full_import_button = QPushButton("Full metadata")
+        full_import_button.clicked.connect(self.import_yummy_full)
+        actions.addWidget(full_import_button)
         right.addLayout(actions)
 
         self.progress = QLabel("")
@@ -198,10 +203,22 @@ class RecipeDialog(QDialog):
             box.exec()
 
     def import_yummy(self):
+        self._start_import(full_metadata=False)
+
+    def import_yummy_full(self):
+        self._start_import(full_metadata=True)
+
+    def _start_import(self, full_metadata: bool):
         if self.import_worker and self.import_worker.isRunning():
             return
-        self.progress.setText("Importing channel index only. Full descriptions require YouTube access.")
-        self.import_worker = RecipeImportWorker(self.store)
+        if full_metadata:
+            self.progress.setText(
+                "Full metadata requires YOUTUBE_COOKIES_FROM_BROWSER "
+                "(for example: chrome)."
+            )
+        else:
+            self.progress.setText("Fast channel import…")
+        self.import_worker = RecipeImportWorker(self.store, full_metadata=full_metadata)
         self.import_worker.progress.connect(self.progress.setText)
         self.import_worker.finished.connect(self.import_finished)
         self.import_worker.failed.connect(self.import_failed)
