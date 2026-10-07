@@ -3,13 +3,12 @@ from __future__ import annotations
 import webbrowser
 
 import httpx
-from PySide6.QtCore import QSettings, QObject, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QSettings, Qt, QThread, Signal, Slot
+from PySide6.QtGui import QPixmap
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
-    QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -477,7 +476,6 @@ new QWebChannel(qt.webChannelTransport, function(channel) {{
         if clear:
             self.results.clear()
         self.current_products = {product.id: product for product in products}
-        self.results.clear()
         for product in products:
             item = QListWidgetItem()
             widget = ProductItem(product)
