@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import shutil
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -28,6 +29,8 @@ from mizansene.crawler.recipes import ingredients_for
 from mizansene.crawler.search import extract_products, rank_products
 from mizansene.crawler.stores import extract_stores
 from mizansene.database.store import ProductStore
+from mizansene.gui.image_loader import ImageLoadWorker
+from mizansene.gui.inventory_dialog import InventoryDialog
 from mizansene.gui.recipe_dialog import RecipeDialog
 
 FOOD_CATEGORIES = [
@@ -158,6 +161,7 @@ class ProductItem(QWidget):
         image.setFixedSize(72, 72)
         image.setAlignment(Qt.AlignCenter)
         image.setStyleSheet("border: 1px solid #ddd; color: #888;")
+        self.image = image
         layout.addWidget(image)
 
         text = QVBoxLayout()
@@ -195,6 +199,12 @@ class ProductItem(QWidget):
             button.clicked.connect(lambda: webbrowser.open(product.url))
             text.addWidget(button)
         layout.addLayout(text)
+
+    def set_thumbnail(self, data: bytes):
+        pixmap = QPixmap()
+        if pixmap.loadFromData(data):
+            self.image.setText("")
+            self.image.setPixmap(pixmap.scaled(72, 72, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
 
 def _latlon_to_world(lat: float, lon: float, zoom: int) -> tuple[float, float]:
@@ -364,6 +374,8 @@ class MainWindow(QMainWindow):
         self.store = ProductStore(DB_PATH)
         self.worker = None
         self.store_worker = None
+        self.image_worker = None
+        self.product_widgets = {}
         self.current_products = {}
         self.search_categories = []
         self.loaded_category_count = 0
@@ -382,6 +394,9 @@ class MainWindow(QMainWindow):
         self.recipes_button = QPushButton("📖 Recipe notebook")
         self.recipes_button.clicked.connect(self.open_recipes)
         title_row.addWidget(self.recipes_button)
+        self.inventory_button = QPushButton("📦 Inventory")
+        self.inventory_button.clicked.connect(self.open_inventory)
+        title_row.addWidget(self.inventory_button)
         self.language_combo = QComboBox()
         self.language_combo.addItem("فارسی", "fa")
         self.language_combo.addItem("English", "en")
@@ -478,6 +493,15 @@ class MainWindow(QMainWindow):
         self.clear_history_button.clicked.connect(self.clear_history)
         layout.addWidget(self.clear_history_button)
 
+        storage_row = QHBoxLayout()
+        self.clear_cache_button = QPushButton("Clear product/image cache")
+        self.clear_cache_button.clicked.connect(self.clear_cache)
+        storage_row.addWidget(self.clear_cache_button)
+        self.clear_empty_recipes_button = QPushButton("Delete empty Yummy recipes")
+        self.clear_empty_recipes_button.clicked.connect(self.clear_empty_recipes)
+        storage_row.addWidget(self.clear_empty_recipes_button)
+        layout.addLayout(storage_row)
+
         self.status = QLabel("Choose a location, store and search.")
         layout.addWidget(self.status)
 
@@ -512,6 +536,9 @@ class MainWindow(QMainWindow):
                 "none": "none",
                 "clear": "Clear search history",
                 "recipes": "📖 Recipe notebook",
+                "inventory": "📦 Inventory",
+                "cache": "Clear product/image cache",
+                "empty_recipes": "Delete empty Yummy recipes",
                 "load_more": "Load more categories",
             },
             "fa": {
@@ -526,6 +553,9 @@ class MainWindow(QMainWindow):
                 "none": "هیچ‌کدام",
                 "clear": "پاک کردن تاریخچه جستجو",
                 "recipes": "📖 دفترچه رسپی",
+                "inventory": "📦 موجودی خانه",
+                "cache": "پاک کردن کش محصولات/عکس‌ها",
+                "empty_recipes": "حذف رسپی‌های خالی یامی",
                 "load_more": "بارگذاری دسته‌های بیشتر",
             },
             "de": {
@@ -540,6 +570,9 @@ class MainWindow(QMainWindow):
                 "none": "keine",
                 "clear": "Suchverlauf löschen",
                 "recipes": "📖 Rezeptbuch",
+                "inventory": "📦 Inventar",
+                "cache": "Produkt-/Bild-Cache löschen",
+                "empty_recipes": "Leere Yummy-Rezepte löschen",
                 "load_more": "Weitere Kategorien laden",
             },
         }[code]
@@ -550,6 +583,9 @@ class MainWindow(QMainWindow):
         self.search_button.setText(texts["search"])
         self.use_manual_button.setText(texts["use_id"])
         self.recipes_button.setText(texts["recipes"])
+        self.inventory_button.setText(texts["inventory"])
+        self.clear_cache_button.setText(texts["cache"])
+        self.clear_empty_recipes_button.setText(texts["empty_recipes"])
         self.clear_history_button.setText(texts["clear"])
         self.load_more.setText(texts["load_more"])
         recent = self.store.recent_searches()
@@ -560,6 +596,20 @@ class MainWindow(QMainWindow):
     def clear_history(self):
         self.store.clear_search_history()
         self.apply_language(self.language_combo.currentData())
+
+    def open_inventory(self):
+        InventoryDialog(self.store, self).exec()
+
+    def clear_cache(self):
+        if QMessageBox.question(self, "Clear cache", "Delete cached Okala responses and downloaded images?") != QMessageBox.Yes:
+            return
+        if CACHE_DIR.exists():
+            shutil.rmtree(CACHE_DIR, ignore_errors=True)
+        self.status.setText("Product and image cache cleared.")
+
+    def clear_empty_recipes(self):
+        count = self.store.clear_empty_youtube_recipes()
+        self.status.setText(f"Deleted {count} empty Yummy recipes.")
 
     def toggle_map(self, visible: bool):
         self.map.setVisible(visible)
@@ -722,12 +772,37 @@ class MainWindow(QMainWindow):
             self.current_products[product.id] = product
         merged = list(self.current_products.values())
         self.results.clear()
-        for product in merged[:30]:
+        self.product_widgets = {}
+        visible = merged[:30]
+        for product in visible:
             item = QListWidgetItem()
             widget = ProductItem(product)
             item.setSizeHint(widget.sizeHint())
             self.results.addItem(item)
             self.results.setItemWidget(item, widget)
+            self.product_widgets[product.id] = widget
+        self._load_product_images(visible)
+
+    def _load_product_images(self, products):
+        items = [
+            (product.id, product.image_url)
+            for product in products
+            if product.image_url
+        ]
+        if self.image_worker and self.image_worker.isRunning():
+            self.image_worker.requestInterruption()
+            self.image_worker.wait(2000)
+        self.image_worker = None
+        if not items:
+            return
+        self.image_worker = ImageLoadWorker(items, CACHE_DIR / "images")
+        self.image_worker.image_ready.connect(self._product_image_ready)
+        self.image_worker.start()
+
+    def _product_image_ready(self, product_id: str, data: bytes):
+        widget = self.product_widgets.get(product_id)
+        if widget is not None:
+            widget.set_thumbnail(data)
 
     def closeEvent(self, event):
         if self.worker and self.worker.isRunning():
@@ -736,6 +811,9 @@ class MainWindow(QMainWindow):
         if self.store_worker and self.store_worker.isRunning():
             self.store_worker.requestInterruption()
             self.store_worker.wait(3000)
+        if self.image_worker and self.image_worker.isRunning():
+            self.image_worker.requestInterruption()
+            self.image_worker.wait(3000)
         self.map.close()
         super().closeEvent(event)
 
