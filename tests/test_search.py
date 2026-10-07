@@ -4,7 +4,13 @@ from mizansene.crawler.search import extract_products, rank_products
 def test_extract_products_normalizes_okala_like_payload():
     payload = {
         "data": [
-            {"id": 1, "name": "شیر کم چرب", "price": 42000, "imageUrl": "https://x/a.jpg", "isAvailable": True},
+            {
+                "id": 1,
+                "name": "شیر کم چرب",
+                "price": 42000,
+                "imageUrl": "https://x/a.jpg",
+                "isAvailable": True,
+            },
             {"id": 2, "productName": "برنج", "sellingPrice": "900000", "isAvailable": False},
         ]
     }
