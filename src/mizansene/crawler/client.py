@@ -22,9 +22,14 @@ class OkalaClient:
 
     BASE_URL = "https://apigateway.okala.com"
 
-    def __init__(self, token: str | None = None, cache_dir: Path | None = None,
-                 timeout: float = 20.0, request_delay: float = 0.7,
-                 cache_ttl: float = 600.0) -> None:
+    def __init__(
+        self,
+        token: str | None = None,
+        cache_dir: Path | None = None,
+        timeout: float = 20.0,
+        request_delay: float = 0.7,
+        cache_ttl: float = 600.0,
+    ) -> None:
         self.token = token
         self.cache_dir = cache_dir
         self.request_delay = request_delay
@@ -33,8 +38,10 @@ class OkalaClient:
         self.http = httpx.Client(
             timeout=timeout,
             follow_redirects=True,
-            headers={"Accept": "application/json",
-                     "User-Agent": "Mizansene/0.1 (+local food shopping assistant)"},
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "Mizansene/0.1 (+local food shopping assistant)",
+            },
         )
         if token:
             self.http.headers["Authorization"] = f"Bearer {token}"
@@ -87,13 +94,36 @@ class OkalaClient:
         return data
 
     def nearby(self, slug: str, lat: float, lon: float) -> Any:
-        return self._get("/api/unicorn/v2/products/nearby",
-                         {"slug": slug, "lat": lat, "lon": lon})
+        return self._get(
+            "/api/unicorn/v2/products/nearby",
+            {"slug": slug, "lat": lat, "lon": lon},
+        )
 
     def store_category(self, store_id: int, slug: str, category_id: int) -> Any:
-        return self._get(f"/api/unicorn/v2/products/store/{store_id}",
-                         {"pC_Id": category_id, "slug": slug})
+        return self._get(
+            f"/api/unicorn/v2/products/store/{store_id}",
+            {"pC_Id": category_id, "slug": slug},
+        )
+
+    def store_category_available(self, store_id: int, slug: str) -> Any:
+        """Return products with Okala's quantity filter enabled.
+
+        SearchByStoreGrouping is useful here because the request explicitly asks
+        Okala for products having quantity, instead of relying on a catalog
+        response whose product records may not contain stock fields.
+        """
+        return self._get(
+            "/api/Search/v1/Product/SearchByStoreGrouping",
+            {
+                "CategorySlugs": slug,
+                "StoreIds": store_id,
+                "hasQuantity": "true",
+                "excludeShoppingCard": "true",
+            },
+        )
 
     def product_detail(self, store_id: int, product_id: int) -> Any:
-        return self._get("/api/Unicorn/v1/catalog/pdp",
-                         {"sId": store_id, "pId": product_id})
+        return self._get(
+            "/api/Unicorn/v1/catalog/pdp",
+            {"sId": store_id, "pId": product_id},
+        )
