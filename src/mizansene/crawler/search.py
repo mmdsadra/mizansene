@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any
 
 from mizansene.models import Product
@@ -13,8 +15,59 @@ def _walk(value: Any):
             yield from _walk(child)
 
 
-def extract_products(payload: Any, store_id: int | None = None) -> list[Product]:
-    """Normalize product dictionaries from changing Okala response shapes."""
+def _availability_value(item: dict[str, Any]) -> bool | None:
+    for key in (
+        "available", "isAvailable", "isAvailableForSale", "isSaleable",
+        "saleable", "inStock", "isInStock", "hasQuantity",
+    ):
+        if key not in item:
+            continue
+        value = item[key]
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value > 0
+        if isinstance(value, str):
+            normalized = value.strip().casefold()
+            if normalized in {"true", "1", "yes", "available", "in stock", "instock"}:
+                return True
+            if normalized in {"false", "0", "no", "unavailable", "out of stock", "outofstock"}:
+                return False
+
+    for key in ("quantity", "availableQuantity", "stock", "inventory"):
+        if key not in item:
+            continue
+        value = item[key]
+        if isinstance(value, (int, float)):
+            return value > 0
+        if isinstance(value, str):
+            try:
+                return float(value.replace(",", "")) > 0
+            except ValueError:
+                pass
+
+    for key in ("isOutOfStock", "outOfStock"):
+        if key not in item:
+            continue
+        value = item[key]
+        if isinstance(value, bool):
+            return not value
+        if isinstance(value, str):
+            normalized = value.strip().casefold()
+            if normalized in {"true", "1", "yes"}:
+                return False
+            if normalized in {"false", "0", "no"}:
+                return True
+
+    return None
+
+
+def extract_products(
+    payload: Any,
+    store_id: int | None = None,
+    *,
+    available_only: bool = True,
+) -> list[Product]:
     products: list[Product] = []
     seen: set[str] = set()
 
@@ -27,7 +80,13 @@ def extract_products(payload: Any, store_id: int | None = None) -> list[Product]
         )
         if not productish:
             continue
+
+        availability = _availability_value(item)
+        if available_only and availability is False:
+            continue
+
         product = Product.from_okala(item, store_id=store_id)
+        product.available = availability
         if product.id in seen:
             continue
         seen.add(product.id)
@@ -35,14 +94,26 @@ def extract_products(payload: Any, store_id: int | None = None) -> list[Product]
     return products
 
 
+def _normalize_persian(text: str) -> str:
+    return (
+        text.casefold()
+        .replace("ي", "ی")
+        .replace("ى", "ی")
+        .replace("ك", "ک")
+        .replace("\u200c", " ")
+    )
+
+
 def rank_products(products: list[Product], query: str) -> list[Product]:
-    terms = [part.casefold() for part in query.split() if part.strip()]
+    terms = [_normalize_persian(part) for part in query.split() if part.strip()]
     normalized_query = " ".join(terms)
 
     def score(product: Product) -> tuple[int, int]:
-        name = product.name.casefold()
+        name = _normalize_persian(product.name)
         exact = 10 if normalized_query and normalized_query in name else 0
         words = sum(2 for term in terms if term in name)
         return exact + words, -len(name)
 
-    return sorted(products, key=score, reverse=True)
+    ranked = [(score(product), product) for product in products]
+    ranked = [item for item in ranked if item[0][0] > 0]
+    return [product for _, product in sorted(ranked, key=lambda item: item[0], reverse=True)]
