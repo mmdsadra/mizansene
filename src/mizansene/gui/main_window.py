@@ -42,6 +42,7 @@ FOOD_CATEGORIES = [
 
 
 class SearchWorker(QThread):
+    batch = Signal(list)
     finished = Signal(list)
     failed = Signal(str)
 
@@ -50,55 +51,76 @@ class SearchWorker(QThread):
         self.query = query
         self.store_id = store_id
 
+    def _rank(self, products):
+        ingredients = ingredients_for(self.query)
+        terms = ingredients or [self.query]
+        if ingredients:
+            ranked: list[tuple[int, object]] = []
+            for product in products:
+                name = product.name.casefold()
+                score = sum(
+                    1
+                    for ingredient in terms
+                    if ingredient.casefold() in name
+                )
+                if score:
+                    ranked.append((score, product))
+            return [
+                product
+                for _, product in sorted(
+                    ranked,
+                    key=lambda pair: (pair[0], -len(pair[1].name)),
+                    reverse=True,
+                )
+            ]
+        return rank_products(products, self.query)
+
     def run(self):
-        client = OkalaClient(token=OKALA_TOKEN, cache_dir=CACHE_DIR)
+        if not self.store_id:
+            self.failed.emit("Select an Okala store before searching.")
+            return
+
+        products_by_id = {}
         try:
-            ingredients = ingredients_for(self.query)
-            terms = ingredients or [self.query]
+            # Three requests at a time keeps the UI responsive while avoiding
+            # the long 9-category serial wait. Each completed category is
+            # emitted immediately, so results appear progressively.
+            from concurrent.futures import ThreadPoolExecutor, as_completed
 
-            if not self.store_id:
-                raise OkalaError("Select an Okala store before searching.")
-
-            products = []
-            for slug, _ in FOOD_CATEGORIES:
-                payload = client.store_category_available(self.store_id, slug)
-                products.extend(
-                    extract_products(
+            def fetch_category(slug):
+                client = OkalaClient(
+                    token=OKALA_TOKEN,
+                    cache_dir=CACHE_DIR,
+                    request_delay=0.15,
+                )
+                try:
+                    payload = client.store_category_available(self.store_id, slug)
+                    return extract_products(
                         payload,
                         self.store_id,
                         available_only=True,
                         assume_available=True,
                     )
-                )
+                finally:
+                    client.close()
 
-            if ingredients:
-                ranked: list[tuple[int, object]] = []
-                for product in products:
-                    name = product.name.casefold()
-                    score = sum(
-                        1
-                        for ingredient in terms
-                        if ingredient.casefold() in name
-                    )
-                    if score:
-                        ranked.append((score, product))
-                products = [
-                    product
-                    for _, product in sorted(
-                        ranked,
-                        key=lambda pair: (pair[0], -len(pair[1].name)),
-                        reverse=True,
-                    )
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                futures = [
+                    executor.submit(fetch_category, slug)
+                    for slug, _ in FOOD_CATEGORIES
                 ]
-            else:
-                products = rank_products(products, self.query)
+                for future in as_completed(futures):
+                    for product in future.result():
+                        products_by_id.setdefault(product.id, product)
+                    ranked = self._rank(list(products_by_id.values()))
+                    self.batch.emit(ranked[:60])
 
-            self.finished.emit(products[:60])
+            final = self._rank(list(products_by_id.values()))
+            self.finished.emit(final[:60])
         except OkalaError as exc:
             self.failed.emit(str(exc))
-        finally:
-            client.close()
-
+        except Exception as exc:
+            self.failed.emit(f"Search failed: {exc}")
 
 class StoreWorker(QThread):
     finished = Signal(list)
