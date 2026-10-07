@@ -55,7 +55,20 @@ class ProductStore:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self.engine = create_engine(f"sqlite:///{db_path}")
         Base.metadata.create_all(self.engine)
+        self._migrate_product_columns()
         self.Session = sessionmaker(self.engine)
+
+    def _migrate_product_columns(self) -> None:
+        # create_all() does not add columns to an existing SQLite table.
+        with self.engine.begin() as connection:
+            columns = {
+                row[1]
+                for row in connection.exec_driver_sql("PRAGMA table_info(products)").fetchall()
+            }
+            if "original_price" not in columns:
+                connection.exec_driver_sql("ALTER TABLE products ADD COLUMN original_price INTEGER")
+            if "discount_percent" not in columns:
+                connection.exec_driver_sql("ALTER TABLE products ADD COLUMN discount_percent FLOAT")
 
     def save_products(self, products: list[Product]) -> None:
         with self.Session.begin() as session:
