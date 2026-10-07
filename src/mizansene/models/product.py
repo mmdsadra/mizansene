@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 
 def _store_product_url(product_id: str, store_id: int | None) -> str:
