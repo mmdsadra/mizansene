@@ -60,14 +60,26 @@ class Product:
         if isinstance(image, dict):
             image = image.get("url") or image.get("src")
 
-        price = _first_number(
+        discounted_price = _first_number(
             raw,
-            ("price", "sellingPrice", "discountedPrice", "discountPrice", "finalPrice"),
+            ("discountedPrice", "discountPrice", "finalPrice"),
         )
+        base_price = _first_number(
+            raw,
+            ("price", "basePrice", "listPrice", "oldPrice"),
+        )
+        price = discounted_price or _first_number(raw, ("sellingPrice",)) or base_price
         original_price = _first_number(
             raw,
-            ("originalPrice", "priceBeforeDiscount", "basePrice", "listPrice", "oldPrice"),
+            ("originalPrice", "priceBeforeDiscount"),
         )
+        if (
+            original_price is None
+            and discounted_price is not None
+            and base_price is not None
+            and base_price > discounted_price
+        ):
+            original_price = base_price
         discount = (
             raw.get("discountPercent")
             or raw.get("discountPercentage")
