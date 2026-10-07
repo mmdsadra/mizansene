@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+import math
 import webbrowser
 
 import httpx
-from PySide6.QtCore import QObject, QSettings, Qt, QThread, Signal, Slot
-from PySide6.QtGui import QPixmap
-from PySide6.QtWebChannel import QWebChannel
-from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtCore import QSettings, Qt, QThread, Signal
+from PySide6.QtGui import QPainter, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QGroupBox,
