@@ -6,6 +6,7 @@ from pathlib import Path
 from sqlalchemy import DateTime, Integer, String, Text, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
+from mizansene.crawler.recipes import RECIPES
 from mizansene.models import Product
 
 
@@ -113,6 +114,10 @@ class ProductStore:
     ) -> int:
         with self.Session.begin() as session:
             row = session.get(RecipeRow, recipe_id) if recipe_id else None
+            if row is None and source_url:
+                row = session.scalars(
+                    select(RecipeRow).where(RecipeRow.source_url == source_url)
+                ).first()
             if row is None:
                 row = RecipeRow(name=name)
                 session.add(row)
@@ -130,6 +135,20 @@ class ProductStore:
             row = session.get(RecipeRow, recipe_id)
             if row is not None:
                 session.delete(row)
+
+    def ensure_seed_recipes(self) -> None:
+        with self.Session.begin() as session:
+            exists = session.scalar(select(RecipeRow.id).limit(1))
+            if exists is not None:
+                return
+            for name, ingredients in RECIPES.items():
+                session.add(
+                    RecipeRow(
+                        name=name,
+                        ingredients="\n".join(ingredients),
+                        instructions="Recipe ingredients from the offline starter dictionary.",
+                    )
+                )
 
     def list_recipes(self) -> list[dict]:
         with self.Session() as session:
