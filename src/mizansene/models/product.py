@@ -1,5 +1,26 @@
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
+
+
+def _store_product_url(product_id: str, store_id: int | None) -> str:
+    if store_id is None:
+        return f"https://www.okala.com/product/{product_id}"
+    return f"https://www.okala.com/store/{store_id}/product/{product_id}"
+
+
+def _normalize_product_url(url: str | None, product_id: str, store_id: int | None) -> str:
+    fallback = _store_product_url(product_id, store_id)
+    if not url:
+        return fallback
+
+    try:
+        parsed = urlsplit(str(url))
+        if parsed.netloc.endswith("okala.com") and parsed.path.rstrip("/").startswith("/product/"):
+            return fallback
+    except ValueError:
+        return fallback
+    return str(url)
 
 
 @dataclass(slots=True)
@@ -32,12 +53,12 @@ class Product:
         except (TypeError, ValueError):
             price = None
 
-        url = raw.get("url") or raw.get("productUrl") or raw.get("link")
-        if not url and product_id is not None:
-            url = f"https://www.okala.com/product/{product_id}"
+        product_id_text = str(product_id or name)
+        raw_url = raw.get("url") or raw.get("productUrl") or raw.get("link")
+        url = _normalize_product_url(raw_url, product_id_text, store_id)
 
         return cls(
-            id=str(product_id or name),
+            id=product_id_text,
             name=str(name),
             url=url,
             image_url=image,
