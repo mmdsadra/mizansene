@@ -1,19 +1,27 @@
 from __future__ import annotations
 
 import webbrowser
-from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMainWindow, QMessageBox, QPushButton, QVBoxLayout, QWidget,
 )
 
-from mizansene.config import CACHE_DIR, DB_PATH, OKALA_LAT, OKALA_LON, OKALA_STORE_ID, OKALA_TOKEN
+from mizansene.config import (
+    CACHE_DIR, DB_PATH, OKALA_LAT, OKALA_LON, OKALA_STORE_ID, OKALA_TOKEN
+)
 from mizansene.crawler.client import OkalaClient, OkalaError
 from mizansene.crawler.search import extract_products, rank_products
 from mizansene.database.store import ProductStore
+
+
+FOOD_CATEGORIES = [
+    ("groceries", 1461), ("dairy-products", 1462), ("proteins", 1463),
+    ("canned-ready-food", 1464), ("beverages", 1465), ("breakfast-goods", 1466),
+    ("nuts-sweets", 1468), ("spices", 1469), ("fruits-vegetables", 1470),
+]
 
 
 class SearchWorker(QThread):
@@ -28,16 +36,15 @@ class SearchWorker(QThread):
     def run(self):
         client = OkalaClient(token=OKALA_TOKEN, cache_dir=CACHE_DIR)
         try:
-            # These are intentionally conservative defaults for the first MVP.
-            # The next crawler iteration can discover the user's nearby store
-            # and category IDs instead of requiring a fixed category.
             if not self.store_id:
                 payload = client.nearby("groceries", OKALA_LAT, OKALA_LON)
+                products = rank_products(extract_products(payload), self.query)
             else:
-                # 1461 is the grocery root category used by existing Okala clients.
-                payload = client.store_category(self.store_id, "groceries", 1461)
-
-            products = rank_products(extract_products(payload, self.store_id), self.query)
+                products = []
+                for slug, category_id in FOOD_CATEGORIES:
+                    payload = client.store_category(self.store_id, slug, category_id)
+                    products.extend(extract_products(payload, self.store_id))
+                products = rank_products(products, self.query)
             self.finished.emit(products[:40])
         except OkalaError as exc:
             self.failed.emit(str(exc))
@@ -52,13 +59,17 @@ class ProductItem(QWidget):
         image = QLabel("No image")
         image.setFixedSize(96, 96)
         image.setAlignment(Qt.AlignCenter)
+        image.setStyleSheet("border: 1px solid #ddd;")
         if product.image_url:
             try:
                 import httpx
-                data = httpx.get(product.image_url, timeout=8).content
+                response = httpx.get(product.image_url, timeout=8)
+                response.raise_for_status()
                 pixmap = QPixmap()
-                pixmap.loadFromData(data)
-                image.setPixmap(pixmap.scaled(96, 96, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                pixmap.loadFromData(response.content)
+                image.setPixmap(
+                    pixmap.scaled(96, 96, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                )
             except Exception:
                 pass
         layout.addWidget(image)
@@ -66,6 +77,7 @@ class ProductItem(QWidget):
         text = QVBoxLayout()
         name = QLabel(product.name)
         name.setWordWrap(True)
+        name.setStyleSheet("font-size: 15px; font-weight: 600;")
         text.addWidget(name)
         if product.price is not None:
             text.addWidget(QLabel(f"{product.price:,} تومان"))
@@ -80,49 +92,40 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Mizansene — Okala food finder")
-        self.resize(760, 700)
+        self.resize(820, 720)
         self.store = ProductStore(DB_PATH)
         self.worker = None
 
         root = QWidget()
         layout = QVBoxLayout(root)
-
         title = QLabel("What do you want to cook or buy?")
         title.setStyleSheet("font-size: 22px; font-weight: 600;")
         layout.addWidget(title)
 
         row = QHBoxLayout()
         self.search = QLineEdit()
-        self.search.setPlaceholderText("e.g. عدس پلو، شیر، مرغ، رب گوجه")
+        self.search.setPlaceholderText("مثلاً: عدس پلو، شیر، مرغ، رب گوجه")
         self.search.returnPressed.connect(self.start_search)
         row.addWidget(self.search)
-
         self.store_id = QLineEdit(OKALA_STORE_ID or "")
-        self.store_id.setPlaceholderText("Store ID (optional)")
+        self.store_id.setPlaceholderText("Okala store ID")
         self.store_id.setMaximumWidth(170)
         row.addWidget(self.store_id)
-
         button = QPushButton("Search")
         button.clicked.connect(self.start_search)
         row.addWidget(button)
         layout.addLayout(row)
 
-        self.history = QComboBox()
-        self.history.addItem("Recent searches")
-        self.history.addItems(self.store.recent_searches())
-        self.history.currentTextChanged.connect(self.use_history)
-        layout.addWidget(self.history)
+        recent = self.store.recent_searches()
+        history = QLabel("Recent: " + (" • ".join(recent) if recent else "none"))
+        history.setWordWrap(True)
+        layout.addWidget(history)
 
         self.status = QLabel("Ready.")
         layout.addWidget(self.status)
-
         self.results = QListWidget()
         layout.addWidget(self.results)
         self.setCentralWidget(root)
-
-    def use_history(self, text: str):
-        if text and text != "Recent searches":
-            self.search.setText(text)
 
     def start_search(self):
         query = self.search.text().strip()
@@ -133,7 +136,6 @@ class MainWindow(QMainWindow):
         except ValueError:
             QMessageBox.warning(self, "Invalid store ID", "Store ID must be a number.")
             return
-
         self.store.add_search(query)
         self.status.setText("Searching Okala…")
         self.results.clear()
