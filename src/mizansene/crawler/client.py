@@ -23,10 +23,12 @@ class OkalaClient:
     BASE_URL = "https://apigateway.okala.com"
 
     def __init__(self, token: str | None = None, cache_dir: Path | None = None,
-                 timeout: float = 20.0, request_delay: float = 0.7) -> None:
+                 timeout: float = 20.0, request_delay: float = 0.7,
+                 cache_ttl: float = 600.0) -> None:
         self.token = token
         self.cache_dir = cache_dir
         self.request_delay = request_delay
+        self.cache_ttl = cache_ttl
         self._last_request = 0.0
         self.http = httpx.Client(
             timeout=timeout,
@@ -49,7 +51,10 @@ class OkalaClient:
         cache_file = self.cache_dir / f"{key}.json" if self.cache_dir else None
         if cache_file and cache_file.exists():
             try:
-                return json.loads(cache_file.read_text(encoding="utf-8"))
+                age = time.time() - cache_file.stat().st_mtime
+                if self.cache_ttl > 0 and age <= self.cache_ttl:
+                    return json.loads(cache_file.read_text(encoding="utf-8"))
+                cache_file.unlink(missing_ok=True)
             except (OSError, json.JSONDecodeError):
                 cache_file.unlink(missing_ok=True)
 
