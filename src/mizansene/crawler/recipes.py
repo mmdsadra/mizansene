@@ -70,6 +70,7 @@ def import_yummy_gastronomy(
     *,
     full_metadata: bool = False,
     limit: int | None = None,
+    existing_urls: set[str] | None = None,
 ) -> int:
     """Import the channel index without downloading videos."""
     try:
@@ -101,6 +102,8 @@ def import_yummy_gastronomy(
             if not video_id or not title:
                 continue
             url = f"https://www.youtube.com/watch?v={video_id}"
+            if existing_urls is not None and url in existing_urls:
+                continue
             if progress:
                 progress(f"Indexing {index}/{total}: {title}")
 
@@ -123,4 +126,6 @@ def import_yummy_gastronomy(
                 source_title=title,
             )
             imported += 1
+            if existing_urls is not None:
+                existing_urls.add(url)
     return imported
