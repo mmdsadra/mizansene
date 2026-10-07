@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
+    QInputDialog,
     QPushButton,
     QTextEdit,
     QVBoxLayout,
@@ -95,6 +96,9 @@ class RecipeDialog(QDialog):
         open_source = QPushButton("Open source")
         open_source.clicked.connect(self.open_source)
         actions.addWidget(open_source)
+        check_button = QPushButton("Check recipe")
+        check_button.clicked.connect(self.check_recipe)
+        actions.addWidget(check_button)
         shopping_button = QPushButton("Smart shopping")
         shopping_button.clicked.connect(self.smart_shopping)
         actions.addWidget(shopping_button)
@@ -177,6 +181,38 @@ class RecipeDialog(QDialog):
         if url:
             webbrowser.open(url)
 
+    def check_recipe(self):
+        ingredients = [
+            line.strip()
+            for line in self.ingredients.toPlainText().splitlines()
+            if line.strip()
+        ]
+        warnings = []
+        if not ingredients:
+            warnings.append("No ingredients were detected.")
+        vague = [item for item in ingredients if not any(ch.isdigit() for ch in item)]
+        if vague:
+            warnings.append(
+                "These ingredients have no visible quantity: "
+                + ", ".join(vague[:8])
+            )
+        if not self.instructions.toPlainText().strip():
+            warnings.append("No cooking instructions are saved.")
+        if self.source.text().startswith("Source: http"):
+            warnings.append("Source link is available.")
+        if warnings:
+            QMessageBox.information(
+                self,
+                "Recipe check",
+                "\n".join(f"• {item}" for item in warnings),
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Recipe check",
+                "Recipe looks complete enough for shopping.",
+            )
+
     def smart_shopping(self):
         raw = [line.strip() for line in self.ingredients.toPlainText().splitlines()]
         ingredients = [line for line in raw if line and len(line) > 1]
@@ -191,15 +227,19 @@ class RecipeDialog(QDialog):
         box = QMessageBox(self)
         box.setWindowTitle("Smart shopping list")
         box.setText("Ingredients detected from this recipe:")
-        box.setDetailedText(suggestions)
+        box.setInformativeText(suggestions)
+        box.exec()
         if self.search_callback:
-            search = box.addButton("Search first ingredient", QMessageBox.AcceptRole)
-            box.exec()
-            if box.clickedButton() is search:
-                self.search_callback(ingredients[0])
-        else:
-            box.setInformativeText(suggestions)
-            box.exec()
+            choice, ok = QInputDialog.getItem(
+                self,
+                "Find ingredient",
+                "Choose an ingredient to search in Okala:",
+                ingredients,
+                0,
+                False,
+            )
+            if ok and choice:
+                self.search_callback(choice)
 
     def import_yummy(self):
         self._start_import(full_metadata=False)
