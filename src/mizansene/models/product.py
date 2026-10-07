@@ -13,7 +13,6 @@ def _normalize_product_url(url: str | None, product_id: str, store_id: int | Non
     fallback = _store_product_url(product_id, store_id)
     if not url:
         return fallback
-
     try:
         parsed = urlsplit(str(url))
         if parsed.netloc.endswith("okala.com") and parsed.path.rstrip("/").startswith("/product/"):
@@ -23,6 +22,18 @@ def _normalize_product_url(url: str | None, product_id: str, store_id: int | Non
     return str(url)
 
 
+def _first_number(raw: dict[str, Any], keys: tuple[str, ...]) -> int | None:
+    for key in keys:
+        value = raw.get(key)
+        if value is None:
+            continue
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 @dataclass(slots=True)
 class Product:
     id: str
@@ -30,6 +41,8 @@ class Product:
     url: str | None = None
     image_url: str | None = None
     price: int | None = None
+    original_price: int | None = None
+    discount_percent: float | None = None
     available: bool | None = None
     store_id: int | None = None
 
@@ -47,22 +60,34 @@ class Product:
         if isinstance(image, dict):
             image = image.get("url") or image.get("src")
 
-        price = raw.get("price") or raw.get("sellingPrice") or raw.get("discountedPrice")
+        price = _first_number(
+            raw,
+            ("price", "sellingPrice", "discountedPrice", "discountPrice", "finalPrice"),
+        )
+        original_price = _first_number(
+            raw,
+            ("originalPrice", "priceBeforeDiscount", "basePrice", "listPrice", "oldPrice"),
+        )
+        discount = raw.get("discountPercent") or raw.get("discountPercentage") or raw.get("discount")
         try:
-            price = int(float(price)) if price is not None else None
+            discount = float(discount) if discount is not None else None
         except (TypeError, ValueError):
-            price = None
+            discount = None
+
+        if original_price and price and original_price > price and not discount:
+            discount = round((original_price - price) * 100 / original_price, 1)
 
         product_id_text = str(product_id or name)
         raw_url = raw.get("url") or raw.get("productUrl") or raw.get("link")
-        url = _normalize_product_url(raw_url, product_id_text, store_id)
 
         return cls(
             id=product_id_text,
             name=str(name),
-            url=url,
+            url=_normalize_product_url(raw_url, product_id_text, store_id),
             image_url=image,
             price=price,
+            original_price=original_price,
+            discount_percent=discount,
             available=raw.get("available") if "available" in raw else raw.get("isAvailable"),
             store_id=store_id,
         )
