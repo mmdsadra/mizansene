@@ -28,18 +28,23 @@ pip install -e '.[dev]'
 mizansene
 ```
 
-Optional environment variables:
+Environment variables:
 
 ```bash
 export OKALA_TOKEN='your-current-token'
 export OKALA_STORE_ID='1234'
-export OKALA_LAT='35.805851'
-export OKALA_LON='51.431311'
+export OKALA_LAT='YOUR_LATITUDE'
+export OKALA_LON='YOUR_LONGITUDE'
 ```
 
-The first MVP accepts a store ID in the GUI because Okala's internal store/category
-API is more stable when a concrete store is selected. The next iteration will discover
-nearby stores automatically and let you choose one.
+Do not leave the location unset if you want nearby-store discovery. Mizansene deliberately
+does not use a Tehran fallback: it uses the coordinates you provide, then asks Okala for
+nearby stores and sorts stores by the distance reported by the API.
+
+For reliable inventory results, select a discovered nearby store (or enter a known store ID)
+before searching. Search results are filtered for explicit out-of-stock signals and only
+products with a positive textual match are returned; unrelated catalog entries are not used
+to fill the result list.
 
 ## Architecture
 
