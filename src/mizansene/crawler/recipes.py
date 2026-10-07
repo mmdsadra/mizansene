@@ -34,18 +34,32 @@ def _description_sections(description: str) -> tuple[str, str]:
     ingredient_markers = ("ingredients", "مواد لازم", "مواد اولیه")
     instruction_markers = ("instructions", "directions", "طرز تهیه", "روش تهیه")
     ingredient_start = next(
-        (i for i, line in enumerate(lines) if any(m in line.casefold() for m in ingredient_markers)),
+        (
+            i
+            for i, line in enumerate(lines)
+            if any(m in line.casefold() for m in ingredient_markers)
+        ),
         None,
     )
     instruction_start = next(
-        (i for i, line in enumerate(lines) if any(m in line.casefold() for m in instruction_markers)),
+        (
+            i
+            for i, line in enumerate(lines)
+            if any(m in line.casefold() for m in instruction_markers)
+        ),
         None,
     )
     if ingredient_start is None:
         return "", "\n".join(lines)
-    end = instruction_start if instruction_start and instruction_start > ingredient_start else len(lines)
+    end = (
+        instruction_start
+        if instruction_start and instruction_start > ingredient_start
+        else len(lines)
+    )
     ingredients = "\n".join(lines[ingredient_start + 1 : end])
-    instructions = "\n".join(lines[instruction_start + 1 :] if instruction_start is not None else lines)
+    instructions = "\n".join(
+        lines[instruction_start + 1 :] if instruction_start is not None else lines
+    )
     return ingredients, instructions
 
 
@@ -88,7 +102,11 @@ def import_yummy_gastronomy(
                 details = ydl.extract_info(url, download=False)
             except Exception:
                 details = None
-            description = ((details or {}).get("description") or entry.get("description") or "").strip()
+            description = (
+                (details or {}).get("description")
+                or entry.get("description")
+                or ""
+            ).strip()
             ingredients, instructions = _description_sections(description)
             if not instructions:
                 instructions = description
