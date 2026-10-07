@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import DateTime, Integer, String, Text, create_engine, select
+from sqlalchemy import DateTime, Float, Integer, String, Text, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from mizansene.crawler.recipes import RECIPES
@@ -37,6 +37,18 @@ class SearchRow(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     query: Mapped[str] = mapped_column(String, index=True)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class InventoryRow(Base):
+    __tablename__ = "inventory"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, index=True)
+    quantity_grams: Mapped[float] = mapped_column(Float, default=0)
+    image_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
 
@@ -133,6 +145,64 @@ class ProductStore:
             row.updated_at = datetime.now(timezone.utc)
             session.flush()
             return int(row.id)
+
+    def add_inventory_item(
+        self,
+        name: str,
+        quantity_grams: float,
+        image_url: str | None = None,
+        item_id: int | None = None,
+    ) -> int:
+        with self.Session.begin() as session:
+            row = session.get(InventoryRow, item_id) if item_id else None
+            if row is None:
+                row = InventoryRow(name=name.strip(), quantity_grams=quantity_grams)
+                session.add(row)
+            row.name = name.strip()
+            row.quantity_grams = float(quantity_grams)
+            row.image_url = image_url
+            row.updated_at = datetime.now(timezone.utc)
+            session.flush()
+            return int(row.id)
+
+    def delete_inventory_item(self, item_id: int) -> None:
+        with self.Session.begin() as session:
+            row = session.get(InventoryRow, item_id)
+            if row is not None:
+                session.delete(row)
+
+    def list_inventory(self) -> list[dict]:
+        with self.Session() as session:
+            rows = session.scalars(
+                select(InventoryRow).order_by(InventoryRow.name)
+            ).all()
+            return [
+                {
+                    "id": row.id,
+                    "name": row.name,
+                    "quantity_grams": row.quantity_grams,
+                    "image_url": row.image_url,
+                }
+                for row in rows
+            ]
+
+    def clear_empty_youtube_recipes(self) -> int:
+        with self.Session.begin() as session:
+            rows = session.scalars(
+                select(RecipeRow).where(
+                    RecipeRow.source_url.is_not(None),
+                    RecipeRow.ingredients == "",
+                    RecipeRow.instructions == "",
+                )
+            ).all()
+            count = len(rows)
+            for row in rows:
+                session.delete(row)
+            return count
+
+    def clear_product_cache(self) -> None:
+        with self.Session.begin() as session:
+            session.query(ProductRow).delete()
 
     def delete_recipe(self, recipe_id: int) -> None:
         with self.Session.begin() as session:
