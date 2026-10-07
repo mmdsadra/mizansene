@@ -225,7 +225,7 @@ class MapTileWorker(QThread):
         max_tile = 2**self.zoom
         tx0 = math.floor(self.center_x / 256)
         ty0 = math.floor(self.center_y / 256)
-        client = httpx.Client(timeout=1.5, headers={"User-Agent": "Mizansene/0.1"})
+        client = httpx.Client(timeout=1.0, headers={"User-Agent": "Mizansene/0.1"})
         try:
             for tx in range(tx0, tx0 + 2):
                 for ty in range(ty0, ty0 + 2):
