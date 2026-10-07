@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import DateTime, Integer, String, create_engine, select
+from sqlalchemy import DateTime, Integer, String, Text, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from mizansene.models import Product
@@ -21,6 +21,8 @@ class ProductRow(Base):
     url: Mapped[str | None] = mapped_column(String, nullable=True)
     image_url: Mapped[str | None] = mapped_column(String, nullable=True)
     price: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    original_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    discount_percent: Mapped[float | None] = mapped_column(nullable=True)
     available: Mapped[bool | None] = mapped_column(nullable=True)
     store_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_seen: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -32,6 +34,20 @@ class SearchRow(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     query: Mapped[str] = mapped_column(String, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class RecipeRow(Base):
+    __tablename__ = "recipes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, index=True)
+    ingredients: Mapped[str] = mapped_column(Text, default="")
+    instructions: Mapped[str] = mapped_column(Text, default="")
+    source_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_title: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class ProductStore:
@@ -52,6 +68,8 @@ class ProductStore:
                 row.url = product.url
                 row.image_url = product.image_url
                 row.price = product.price
+                row.original_price = product.original_price
+                row.discount_percent = product.discount_percent
                 row.available = product.available
                 row.store_id = product.store_id
                 row.last_seen = datetime.now(timezone.utc)
@@ -66,3 +84,47 @@ class ProductStore:
                 select(SearchRow).order_by(SearchRow.created_at.desc()).limit(limit)
             ).all()
             return [row.query for row in rows]
+
+    def upsert_recipe(
+        self,
+        name: str,
+        ingredients: str,
+        instructions: str,
+        source_url: str | None = None,
+        source_title: str | None = None,
+        recipe_id: int | None = None,
+    ) -> int:
+        with self.Session.begin() as session:
+            row = session.get(RecipeRow, recipe_id) if recipe_id else None
+            if row is None:
+                row = RecipeRow(name=name)
+                session.add(row)
+            row.name = name.strip()
+            row.ingredients = ingredients
+            row.instructions = instructions
+            row.source_url = source_url
+            row.source_title = source_title
+            row.updated_at = datetime.now(timezone.utc)
+            session.flush()
+            return int(row.id)
+
+    def delete_recipe(self, recipe_id: int) -> None:
+        with self.Session.begin() as session:
+            row = session.get(RecipeRow, recipe_id)
+            if row is not None:
+                session.delete(row)
+
+    def list_recipes(self) -> list[dict]:
+        with self.Session() as session:
+            rows = session.scalars(select(RecipeRow).order_by(RecipeRow.name)).all()
+            return [
+                {
+                    "id": row.id,
+                    "name": row.name,
+                    "ingredients": row.ingredients,
+                    "instructions": row.instructions,
+                    "source_url": row.source_url,
+                    "source_title": row.source_title,
+                }
+                for row in rows
+            ]
