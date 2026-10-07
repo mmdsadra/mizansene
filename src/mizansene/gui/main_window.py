@@ -43,27 +43,37 @@ class SearchWorker(QThread):
 
             if not self.store_id:
                 raise OkalaError("Select a nearby Okala store before searching.")
-            products = []
-                for slug, category_id in FOOD_CATEGORIES:
-                    payload = client.store_category(self.store_id, slug, category_id)
-                    products.extend(extract_products(payload, self.store_id, available_only=True))
 
-                # A recipe produces a useful combined shopping result. Products
-                # are scored against every ingredient and deduplicated by ID.
-                if ingredients:
-                    ranked: list[tuple[int, object]] = []
-                    for product in products:
-                        score = sum(
-                            1 for ingredient in terms
-                            if ingredient.casefold() in product.name.casefold()
-                        )
-                        if score:
-                            ranked.append((score, product))
-                    products = [p for _, p in sorted(
-                        ranked, key=lambda pair: (pair[0], -len(pair[1].name)), reverse=True
-                    )]
-                else:
-                    products = rank_products(products, self.query)
+            products = []
+            for slug, category_id in FOOD_CATEGORIES:
+                payload = client.store_category(self.store_id, slug, category_id)
+                products.extend(
+                    extract_products(
+                        payload,
+                        self.store_id,
+                        available_only=True,
+                    )
+                )
+
+            if ingredients:
+                ranked: list[tuple[int, object]] = []
+                for product in products:
+                    score = sum(
+                        1
+                        for ingredient in terms
+                        if ingredient.casefold() in product.name.casefold()
+                    )
+                    if score:
+                        ranked.append((score, product))
+                products = [
+                    p for _, p in sorted(
+                        ranked,
+                        key=lambda pair: (pair[0], -len(pair[1].name)),
+                        reverse=True,
+                    )
+                ]
+            else:
+                products = rank_products(products, self.query)
 
             self.finished.emit(products[:60])
         except OkalaError as exc:
