@@ -223,12 +223,14 @@ class MapTileWorker(QThread):
     def run(self):
         tiles = {}
         max_tile = 2**self.zoom
-        tx0 = math.floor(self.center_x / 256) - 1
-        ty0 = math.floor(self.center_y / 256) - 1
-        client = httpx.Client(timeout=3, headers={"User-Agent": "Mizansene/0.1"})
+        tx0 = math.floor(self.center_x / 256)
+        ty0 = math.floor(self.center_y / 256)
+        client = httpx.Client(timeout=1.5, headers={"User-Agent": "Mizansene/0.1"})
         try:
-            for tx in range(tx0, tx0 + 3):
-                for ty in range(ty0, ty0 + 3):
+            for tx in range(tx0, tx0 + 2):
+                for ty in range(ty0, ty0 + 2):
+                    if self.isInterruptionRequested():
+                        return
                     if ty < 0 or ty >= max_tile:
                         continue
                     url = f"https://tile.openstreetmap.org/{self.zoom}/{tx % max_tile}/{ty}.png"
@@ -261,7 +263,7 @@ class MapWidget(QWidget):
     def _stop_tile_worker(self):
         if self.tile_worker is not None and self.tile_worker.isRunning():
             self.tile_worker.requestInterruption()
-            self.tile_worker.wait(3500)
+            self.tile_worker.wait(5000)
         self.tile_worker = None
 
     def close(self):
