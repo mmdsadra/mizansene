@@ -3,7 +3,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from mizansene.models.product import _normalize_persian
+def _normalize_persian(text: str) -> str:
+    return text.casefold().replace("ي", "ی").replace("ى", "ی").replace("ك", "ک").replace("ـ", "").replace("\u200c", " ")
 
 
 @dataclass(slots=True)
