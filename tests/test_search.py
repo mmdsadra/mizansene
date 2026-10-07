@@ -73,3 +73,19 @@ def test_stock_status_is_respected():
     }
     products = extract_products(payload)
     assert [product.name for product in products] == ["شیر"]
+
+
+def test_store_product_url_uses_store_path():
+    payload = {
+        "data": [
+            {"id": 22191, "name": "تن ماهی", "url": "https://www.okala.com/product/22191"}
+        ]
+    }
+    products = extract_products(payload, store_id=6954)
+    assert products[0].url == "https://www.okala.com/store/6954/product/22191"
+
+
+def test_store_product_url_is_created_when_missing():
+    payload = {"data": [{"id": 22191, "name": "تن ماهی"}]}
+    products = extract_products(payload, store_id=6954)
+    assert products[0].url == "https://www.okala.com/store/6954/product/22191"
