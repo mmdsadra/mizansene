@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+
 def _normalize_persian(text: str) -> str:
     return text.casefold().replace("ي", "ی").replace("ى", "ی").replace("ك", "ک").replace("ـ", "").replace("\u200c", " ")
 
@@ -47,8 +48,8 @@ def parse_ingredient(line: str) -> ParsedIngredient:
     quantity = None
     unit = None
     match = re.search(
-        rf"(?P<number>{_NUMBER})\\s*(?P<unit>کیلوگرم|کیلو|گرم|میلی ?لیتر|لیتر|"
-        rf"قاشق(?: غذاخوری| چایخوری)?|پیمانه|عدد|حبه|دسته|kg|g|ml|l)\\b?",
+        rf"(?P<number>{_NUMBER})\s*(?P<unit>کیلوگرم|کیلو|گرم|میلی ?لیتر|لیتر|"
+        rf"قاشق(?: غذاخوری| چایخوری)?|پیمانه|عدد|حبه|دسته|kg|g|ml|l)\b?",
         normalized,
         re.IGNORECASE,
     )
@@ -57,14 +58,14 @@ def parse_ingredient(line: str) -> ParsedIngredient:
         unit = _UNITS.get(match.group("unit").strip().casefold())
         name = (normalized[: match.start()] + " " + normalized[match.end() :]).strip()
     else:
-        piece = re.match(rf"^({_NUMBER})\\s+(.+)$", normalized)
+        piece = re.match(rf"^({_NUMBER})\s+(.+)$", normalized)
         if piece:
             quantity = _parse_number(piece.group(1))
             unit = "piece"
             name = piece.group(2).strip()
         else:
             name = normalized
-    name = re.sub(r"^[\-–—•*]+\\s*", "", name).strip(" :،,")
+    name = re.sub(r"^[\-–—•*]+\s*", "", name).strip(" :،,")
     return ParsedIngredient(raw=raw, name=name, quantity=quantity, unit=unit)
 
 
