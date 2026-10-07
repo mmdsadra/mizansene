@@ -25,7 +25,9 @@ class ProductRow(Base):
     discount_percent: Mapped[float | None] = mapped_column(nullable=True)
     available: Mapped[bool | None] = mapped_column(nullable=True)
     store_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    last_seen: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_seen: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class SearchRow(Base):
@@ -33,7 +35,9 @@ class SearchRow(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     query: Mapped[str] = mapped_column(String, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class RecipeRow(Base):
