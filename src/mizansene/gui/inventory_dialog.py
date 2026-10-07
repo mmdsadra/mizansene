@@ -4,15 +4,15 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QDialog,
+    QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
-    QPushButton,
-    QDoubleSpinBox,
     QLineEdit,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
