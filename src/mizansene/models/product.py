@@ -68,7 +68,11 @@ class Product:
             raw,
             ("originalPrice", "priceBeforeDiscount", "basePrice", "listPrice", "oldPrice"),
         )
-        discount = raw.get("discountPercent") or raw.get("discountPercentage") or raw.get("discount")
+        discount = (
+            raw.get("discountPercent")
+            or raw.get("discountPercentage")
+            or raw.get("discount")
+        )
         try:
             discount = float(discount) if discount is not None else None
         except (TypeError, ValueError):
