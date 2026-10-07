@@ -15,26 +15,51 @@ def _walk(value: Any):
             yield from _walk(child)
 
 
+def _parse_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value > 0
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in {"true", "1", "yes", "available", "in stock", "instock"}:
+            return True
+        if normalized in {
+            "false",
+            "0",
+            "no",
+            "unavailable",
+            "out of stock",
+            "outofstock",
+        }:
+            return False
+    return None
+
+
 def _availability_value(item: dict[str, Any]) -> bool | None:
     for key in (
-        "available", "isAvailable", "isAvailableForSale", "isSaleable",
-        "saleable", "inStock", "isInStock", "hasQuantity",
+        "available",
+        "isAvailable",
+        "isAvailableForSale",
+        "isSaleable",
+        "saleable",
+        "inStock",
+        "isInStock",
+        "hasQuantity",
     ):
-        if key not in item:
-            continue
-        value = item[key]
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return value > 0
-        if isinstance(value, str):
-            normalized = value.strip().casefold()
-            if normalized in {"true", "1", "yes", "available", "in stock", "instock"}:
-                return True
-            if normalized in {"false", "0", "no", "unavailable", "out of stock", "outofstock"}:
-                return False
+        if key in item:
+            parsed = _parse_bool(item[key])
+            if parsed is not None:
+                return parsed
 
-    for key in ("quantity", "availableQuantity", "stock", "inventory"):
+    for key in (
+        "quantity",
+        "availableQuantity",
+        "stock",
+        "inventory",
+        "stockQuantity",
+        "availableStock",
+    ):
         if key not in item:
             continue
         value = item[key]
@@ -44,20 +69,22 @@ def _availability_value(item: dict[str, Any]) -> bool | None:
             try:
                 return float(value.replace(",", "")) > 0
             except ValueError:
-                pass
+                continue
 
     for key in ("isOutOfStock", "outOfStock"):
+        if key in item:
+            parsed = _parse_bool(item[key])
+            if parsed is not None:
+                return not parsed
+
+    for key in ("availabilityStatus", "stockStatus", "inventoryStatus"):
         if key not in item:
             continue
-        value = item[key]
-        if isinstance(value, bool):
-            return not value
-        if isinstance(value, str):
-            normalized = value.strip().casefold()
-            if normalized in {"true", "1", "yes"}:
-                return False
-            if normalized in {"false", "0", "no"}:
-                return True
+        normalized = str(item[key]).strip().casefold().replace("_", " ")
+        if any(word in normalized for word in ("out of stock", "unavailable", "sold out")):
+            return False
+        if any(word in normalized for word in ("available", "in stock")):
+            return True
 
     return None
 
@@ -67,6 +94,7 @@ def extract_products(
     store_id: int | None = None,
     *,
     available_only: bool = True,
+    assume_available: bool = False,
 ) -> list[Product]:
     products: list[Product] = []
     seen: set[str] = set()
@@ -82,6 +110,8 @@ def extract_products(
             continue
 
         availability = _availability_value(item)
+        if availability is None and assume_available:
+            availability = True
         if available_only and availability is False:
             continue
 
@@ -116,4 +146,7 @@ def rank_products(products: list[Product], query: str) -> list[Product]:
 
     ranked = [(score(product), product) for product in products]
     ranked = [item for item in ranked if item[0][0] > 0]
-    return [product for _, product in sorted(ranked, key=lambda item: item[0], reverse=True)]
+    return [
+        product
+        for _, product in sorted(ranked, key=lambda item: item[0], reverse=True)
+    ]
