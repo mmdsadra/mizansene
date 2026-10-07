@@ -223,21 +223,21 @@ class MapTileWorker(QThread):
     def run(self):
         tiles = {}
         max_tile = 2**self.zoom
-        tx0, ty0 = math.floor(self.center_x / 256) - 1, math.floor(self.center_y / 256) - 1
-        client = httpx.Client(timeout=5, headers={"User-Agent": "Mizansene/0.1"})
+        tx0 = math.floor(self.center_x / 256) - 1
+        ty0 = math.floor(self.center_y / 256) - 1
+        client = httpx.Client(timeout=3, headers={"User-Agent": "Mizansene/0.1"})
         try:
             for tx in range(tx0, tx0 + 3):
                 for ty in range(ty0, ty0 + 3):
                     if ty < 0 or ty >= max_tile:
                         continue
                     url = f"https://tile.openstreetmap.org/{self.zoom}/{tx % max_tile}/{ty}.png"
-                    response = client.get(url)
-                    response.raise_for_status()
-                    pixmap = QPixmap()
-                    if pixmap.loadFromData(response.content):
-                        tiles[(tx, ty)] = pixmap
-        except httpx.HTTPError:
-            pass
+                    try:
+                        response = client.get(url)
+                        response.raise_for_status()
+                    except httpx.HTTPError:
+                        continue
+                    tiles[(tx, ty)] = response.content
         finally:
             client.close()
         self.tiles_ready.emit(tiles)
@@ -251,14 +251,24 @@ class MapWidget(QWidget):
         self.setMinimumHeight(200)
         self.zoom = 13
         self.lat, self.lon = lat, lon
-        self.tiles = {}
+        self.tiles: dict[tuple[int, int], QPixmap] = {}
         self.center_world = _latlon_to_world(lat, lon, self.zoom)
-        self.tile_worker = None
+        self.tile_worker: MapTileWorker | None = None
         self.drag_start = None
         self.press_pos = None
         self._load_tiles()
 
+    def _stop_tile_worker(self):
+        if self.tile_worker is not None and self.tile_worker.isRunning():
+            self.tile_worker.requestInterruption()
+            self.tile_worker.wait(3500)
+        self.tile_worker = None
+
+    def close(self):
+        self._stop_tile_worker()
+
     def _load_tiles(self):
+        self._stop_tile_worker()
         center_x, center_y = self.center_world
         self.tiles = {}
         self.update()
@@ -273,12 +283,16 @@ class MapWidget(QWidget):
         if emit:
             self.locationSelected.emit(lat, lon)
 
-    def _tiles_loaded(self, tiles):
-        self.tiles = tiles
+    def _tiles_loaded(self, tile_data):
+        self.tiles = {}
+        for key, data in tile_data.items():
+            pixmap = QPixmap()
+            if pixmap.loadFromData(data):
+                self.tiles[key] = pixmap
         self.update()
 
     def zoom_by(self, delta: int):
-        new_zoom = max(4, min(18, self.zoom + delta))
+        new_zoom = max(5, min(17, self.zoom + delta))
         if new_zoom == self.zoom:
             return
         self.zoom = new_zoom
@@ -334,7 +348,6 @@ class MapWidget(QWidget):
         origin_y = self.center_world[1] * 256 - self.height() / 2
         for (tx, ty), pixmap in self.tiles.items():
             painter.drawPixmap(int(tx * 256 - origin_x), int(ty * 256 - origin_y), pixmap)
-
         cx, cy = self.width() // 2, self.height() // 2
         painter.setBrush(Qt.red)
         painter.drawEllipse(cx - 6, cy - 6, 12, 12)
@@ -622,6 +635,16 @@ class MainWindow(QMainWindow):
             item.setSizeHint(widget.sizeHint())
             self.results.addItem(item)
             self.results.setItemWidget(item, widget)
+
+    def closeEvent(self, event):
+        if self.worker and self.worker.isRunning():
+            self.worker.requestInterruption()
+            self.worker.wait(3000)
+        if self.store_worker and self.store_worker.isRunning():
+            self.store_worker.requestInterruption()
+            self.store_worker.wait(3000)
+        self.map.close()
+        super().closeEvent(event)
 
     def show_error(self, message: str):
         self.store_combo.setEnabled(True)
