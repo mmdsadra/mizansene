@@ -42,14 +42,11 @@ class SearchWorker(QThread):
             terms = ingredients or [self.query]
 
             if not self.store_id:
-                payload = client.nearby("groceries", OKALA_LAT, OKALA_LON)
-                products = extract_products(payload)
-                products = rank_products(products, self.query)
-            else:
-                products = []
+                raise OkalaError("Select a nearby Okala store before searching.")
+            products = []
                 for slug, category_id in FOOD_CATEGORIES:
                     payload = client.store_category(self.store_id, slug, category_id)
-                    products.extend(extract_products(payload, self.store_id))
+                    products.extend(extract_products(payload, self.store_id, available_only=True))
 
                 # A recipe produces a useful combined shopping result. Products
                 # are scored against every ingredient and deduplicated by ID.
@@ -80,6 +77,9 @@ class StoreWorker(QThread):
     failed = Signal(str)
 
     def run(self):
+        if OKALA_LAT is None or OKALA_LON is None:
+            self.failed.emit("Set OKALA_LAT and OKALA_LON to your location before finding nearby stores.")
+            return
         client = OkalaClient(token=OKALA_TOKEN, cache_dir=CACHE_DIR)
         try:
             payload = client.nearby("groceries", OKALA_LAT, OKALA_LON)
@@ -150,7 +150,7 @@ class MainWindow(QMainWindow):
 
         self.store_combo = QComboBox()
         self.store_combo.setMinimumWidth(230)
-        self.store_combo.addItem("Use store ID manually", None)
+        self.store_combo.addItem("Select a nearby store", None)
         if OKALA_STORE_ID:
             self.store_combo.addItem(f"Configured store: {OKALA_STORE_ID}", int(OKALA_STORE_ID))
             self.store_combo.setCurrentIndex(1)
@@ -174,7 +174,7 @@ class MainWindow(QMainWindow):
         history.setWordWrap(True)
         layout.addWidget(history)
 
-        self.status = QLabel("Ready.")
+        self.status = QLabel("Set your coordinates, find nearby stores, then select a store.")
         layout.addWidget(self.status)
         self.results = QListWidget()
         layout.addWidget(self.results)
@@ -199,7 +199,7 @@ class MainWindow(QMainWindow):
         self.store_combo.addItem("Choose a nearby store", None)
         for store_id, name in stores:
             self.store_combo.addItem(f"{name} ({store_id})", store_id)
-        self.status.setText(f"Found {len(stores)} stores.")
+        self.status.setText(f"Found {len(stores)} nearby stores. Select one before searching.")
 
     def start_search(self):
         query = self.search.text().strip()
@@ -211,8 +211,12 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Invalid store ID", "Store ID must be a number.")
             return
 
+        if store_id is None:
+            QMessageBox.information(self, "Choose a store", "Find nearby stores and select a store first, or enter an Okala store ID.")
+            return
+
         self.store.add_search(query)
-        self.status.setText("Searching Okala…")
+        self.status.setText("Searching selected Okala store…")
         self.results.clear()
         self.worker = SearchWorker(query, store_id)
         self.worker.finished.connect(self.show_results)
