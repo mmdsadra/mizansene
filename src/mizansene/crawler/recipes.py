@@ -66,12 +66,11 @@ def _description_sections(description: str) -> tuple[str, str]:
 def import_yummy_gastronomy(
     save_recipe: Callable[..., int],
     progress: Callable[[str], None] | None = None,
+    *,
+    full_metadata: bool = False,
+    limit: int | None = None,
 ) -> int:
-    """Import recipe metadata/descriptions from the channel without downloading videos.
-
-    yt-dlp is used only for public video metadata. Each video becomes an editable
-    local recipe with its YouTube URL retained as the source.
-    """
+    """Import the channel index without downloading videos."""
     try:
         from yt_dlp import YoutubeDL
     except ImportError as exc:
@@ -79,41 +78,40 @@ def import_yummy_gastronomy(
 
     options = {
         "quiet": True,
+        "no_warnings": True,
         "skip_download": True,
-        "extract_flat": True,
+        "extract_flat": not full_metadata,
         "ignoreerrors": True,
     }
     imported = 0
     with YoutubeDL(options) as ydl:
         channel = ydl.extract_info(YUMMY_GASTRONOMY_URL, download=False)
-        entries = (channel or {}).get("entries") or []
+        entries = [entry for entry in (channel or {}).get("entries") or [] if entry]
+        if limit:
+            entries = entries[:limit]
+        total = len(entries)
         for index, entry in enumerate(entries, 1):
-            if not entry:
-                continue
             video_id = entry.get("id")
             title = (entry.get("title") or "").strip()
             if not video_id or not title:
                 continue
             url = f"https://www.youtube.com/watch?v={video_id}"
             if progress:
-                progress(f"Importing {index}/{len(entries)}: {title}")
+                progress(f"Indexing {index}/{total}: {title}")
 
-            try:
-                details = ydl.extract_info(url, download=False)
-            except Exception:
-                details = None
-            description = (
-                (details or {}).get("description")
-                or entry.get("description")
-                or ""
-            ).strip()
+            description = (entry.get("description") or "").strip()
+            if full_metadata and not description:
+                try:
+                    details = ydl.extract_info(url, download=False)
+                except Exception:
+                    details = None
+                description = ((details or {}).get("description") or "").strip()
+
             ingredients, instructions = _description_sections(description)
-            if not instructions:
-                instructions = description
             save_recipe(
                 name=title,
                 ingredients=ingredients,
-                instructions=instructions,
+                instructions=instructions or description,
                 source_url=url,
                 source_title=title,
             )
