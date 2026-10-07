@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Callable
+from collections.abc import Callable
 
 YUMMY_GASTRONOMY_URL = "https://www.youtube.com/c/YummyGastronomy"
 
@@ -74,6 +74,7 @@ def import_yummy_gastronomy(
     """Import the channel index without downloading videos."""
     try:
         from yt_dlp import YoutubeDL
+        from yt_dlp.utils import DownloadError
     except ImportError as exc:
         raise RuntimeError("Install yt-dlp to import YouTube recipes.") from exc
 
@@ -107,7 +108,7 @@ def import_yummy_gastronomy(
             if full_metadata and not description:
                 try:
                     details = ydl.extract_info(url, download=False)
-                except Exception:
+                except (DownloadError, OSError, RuntimeError):
                     details = None
                 description = ((details or {}).get("description") or "").strip()
 
