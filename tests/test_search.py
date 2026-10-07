@@ -89,3 +89,39 @@ def test_store_product_url_is_created_when_missing():
     payload = {"data": [{"id": 22191, "name": "تن ماهی"}]}
     products = extract_products(payload, store_id=6954)
     assert products[0].url == "https://www.okala.com/store/6954/product/22191"
+
+
+
+def test_discount_is_extracted_and_calculated():
+    payload = {
+        "data": [
+            {
+                "id": 20,
+                "name": "تن ماهی",
+                "price": 80000,
+                "originalPrice": 100000,
+            }
+        ]
+    }
+    product = extract_products(payload, store_id=6954)[0]
+    assert product.price == 80000
+    assert product.original_price == 100000
+    assert product.discount_percent == 20.0
+
+
+def test_explicit_discount_price_is_preferred():
+    payload = {
+        "data": [
+            {
+                "id": 21,
+                "name": "شیر",
+                "sellingPrice": 75000,
+                "priceBeforeDiscount": 90000,
+                "discountPercentage": 16.7,
+            }
+        ]
+    }
+    product = extract_products(payload, store_id=1)[0]
+    assert product.price == 75000
+    assert product.original_price == 90000
+    assert product.discount_percent == 16.7
