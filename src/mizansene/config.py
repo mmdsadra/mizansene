@@ -9,6 +9,23 @@ CACHE_DIR = DATA_DIR / "cache"
 DB_PATH = DATA_DIR / "mizansene.sqlite3"
 
 OKALA_TOKEN = os.getenv("OKALA_TOKEN")
-OKALA_LAT = float(os.getenv("OKALA_LAT", "35.805851"))
-OKALA_LON = float(os.getenv("OKALA_LON", "51.431311"))
 OKALA_STORE_ID = os.getenv("OKALA_STORE_ID")
+
+
+def _optional_float(name: str) -> float | None:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a valid decimal latitude/longitude.") from exc
+
+
+# Never silently default to Tehran. Nearby-store discovery requires explicit
+# coordinates supplied by the user/environment.
+OKALA_LAT = _optional_float("OKALA_LAT")
+OKALA_LON = _optional_float("OKALA_LON")
+
+if (OKALA_LAT is None) != (OKALA_LON is None):
+    raise ValueError("Set both OKALA_LAT and OKALA_LON, or leave both unset.")
