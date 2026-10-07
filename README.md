@@ -3,21 +3,23 @@
 **Mizansene** is a local-first desktop food shopping assistant for Okala.
 
 Type a food, ingredient, or recipe name. Mizansene discovers nearby Okala stores from
-coordinates entered in the GUI, lets you select the exact store, searches its
-quantity-filtered inventory, ranks matching products, keeps local search/product history,
-and gives you a direct Okala link.
+coordinates entered in the GUI, lets you select the exact store, searches quantity-filtered
+inventory, ranks matching products, keeps local history, and gives a store-specific Okala link.
 
-## MVP
+## Features
 
 - PySide6 desktop GUI
-- GUI location panel with persistent latitude/longitude
+- Collapsible location map with click-to-select, pan and zoom
 - Nearby Okala store discovery + explicit store selection
+- Fast smart-category search
+- Progressive lazy loading of additional categories
 - Quantity-filtered store inventory search
-- Okala gateway client
-- Request throttling + JSON cache
-- SQLite product/search history
+- Product price, original price and discount percentage
+- Store-specific Okala product URLs
+- Editable local recipe notebook
+- Yummy Gastronomy YouTube metadata/description importer
+- SQLite product/search/recipe history
 - Persian/English input
-- Product image + price + Okala link
 - Unit tests + GitHub Actions
 
 ## Setup
@@ -38,43 +40,36 @@ export OKALA_TOKEN='your-current-token'
 ```
 
 You do **not** need to export latitude, longitude, or a store ID. Open Mizansene,
-enter your latitude and longitude in the **Location** panel, click **Save location**,
-then click **Find nearby stores**. The closest returned store is selected automatically,
-and you can change the selection before searching.
+enter your latitude and longitude, click **Save**, then click **Find nearby stores**.
 
-Search uses Okala's quantity-filtered store search rather than treating a generic catalog
-response as in-stock inventory. Products with explicit out-of-stock signals are also
-discarded.
+The search starts with a small category set. **Load more categories** fetches the next
+set only when needed, avoiding a nine-request wait for every search.
+
+## Recipe notebook
+
+The **Recipe notebook** button opens an editable local cookbook. Recipes can be created,
+edited, deleted, opened at their source URL, and imported from the Yummy Gastronomy
+YouTube channel.
+
+The importer stores video title, description, ingredients/instructions when recognizable,
+and the original YouTube URL. It does not download the video itself.
 
 ## Architecture
 
 ```
 GUI
- └── SearchWorker
-      ├── OkalaClient ── Okala gateway
-      ├── quantity-filtered store inventory
-      ├── product normalization/ranking
-      └── ProductStore ── SQLite
+ ├── SearchWorker ── OkalaClient ── Okala gateway
+ ├── RecipeDialog ── SQLite recipe notebook
+ └── ProductStore ── SQLite products/search history
 ```
 
-Okala-specific URLs live only in `crawler/client.py`, making API changes isolated.
-
-## Roadmap
-
-1. Automatic nearby-store discovery + store picker
-2. Inventory indexing into SQLite
-3. Recipe → ingredient extraction
-4. Quantity/unit normalization
-5. Persian fuzzy matching + synonyms
-6. Async image caching
-7. Shopping lists/favorites/price comparison
-8. Linux/Windows releases
+Okala-specific URLs live only in `crawler/client.py`.
 
 ## Responsible crawling
 
 Mizansene caches responses and throttles requests. It does not attempt to bypass
 authentication, rate limits, CAPTCHAs, or other access controls. Use it in accordance
-with Okala's terms and applicable law.
+with Okala's and YouTube's terms and applicable law.
 
 ## License
 
