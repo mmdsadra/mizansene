@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from urllib.parse import quote_plus
-
 import httpx
 
 
@@ -16,7 +14,6 @@ class InventoryItem:
 
 def find_food_image(name: str) -> str | None:
     """Find a representative food image through Wikimedia Commons."""
-    query = quote_plus(name.strip())
     url = "https://commons.wikimedia.org/w/api.php"
     params = {
         "action": "query",
