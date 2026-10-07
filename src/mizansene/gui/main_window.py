@@ -121,7 +121,7 @@ class SearchWorker(QThread):
             self.finished.emit(final[:60])
         except OkalaError as exc:
             self.failed.emit(str(exc))
-        except Exception as exc:
+        except ValueError as exc:
             self.failed.emit(f"Search failed: {exc}")
 
 class StoreWorker(QThread):
