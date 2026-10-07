@@ -15,7 +15,7 @@ class ParsedIngredient:
     unit: str | None
 
 
-_NUMBER = r"(\\d+(?:[.,]\\d+)?)"
+_NUMBER = r"(\d+(?:[.,]\d+)?)"
 _UNITS = {
     "گرم": "g",
     "g": "g",
