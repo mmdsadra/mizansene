@@ -16,6 +16,7 @@ dependencies = [
   "lxml>=5.0",
   "pydantic>=2.7",
   "SQLAlchemy>=2.0",
+  "yt-dlp>=2025.1.0",
 ]
 
 [project.optional-dependencies]
