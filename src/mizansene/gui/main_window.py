@@ -309,7 +309,13 @@ class MapWidget(QWidget):
         if event.button() != Qt.LeftButton:
             return
         self.setCursor(Qt.ArrowCursor)
-        if self.press_pos is not None and (abs(self.press_pos.x() - event.position().x()) + abs(self.press_pos.y() - event.position().y()) < 4):
+        click_distance = (
+            abs(self.press_pos.x() - event.position().x())
+            + abs(self.press_pos.y() - event.position().y())
+            if self.press_pos is not None
+            else 999
+        )
+        if click_distance < 4:
             origin_x = self.center_world[0] * 256 - self.width() / 2
             origin_y = self.center_world[1] * 256 - self.height() / 2
             world_x = (origin_x + event.position().x()) / 256
@@ -464,7 +470,11 @@ class MainWindow(QMainWindow):
     def save_location(self):
         location = self.location_values()
         if location is None:
-            QMessageBox.warning(self, "Invalid location", "Enter valid decimal latitude and longitude.")
+            QMessageBox.warning(
+                self,
+                "Invalid location",
+                "Enter valid decimal latitude and longitude.",
+            )
             return
         lat, lon = location
         self.settings.setValue("latitude", lat)
