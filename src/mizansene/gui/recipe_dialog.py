@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTextEdit,
     QVBoxLayout,
-    QWidget,
 )
 
 from mizansene.crawler.recipes import import_yummy_gastronomy
@@ -38,7 +37,7 @@ class RecipeImportWorker(QThread):
                 full_metadata=self.full_metadata,
             )
             self.finished.emit(count)
-        except Exception as exc:
+        except (RuntimeError, OSError) as exc:
             self.failed.emit(str(exc))
 
 
