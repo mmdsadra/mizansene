@@ -310,13 +310,10 @@ class MainWindow(QMainWindow):
         coordinate_row.addWidget(self.longitude)
         location_layout.addLayout(coordinate_row)
 
-        self.map = QWebEngineView()
-        self.map.setMinimumHeight(280)
-        self.map_bridge = LocationBridge(self)
-        self.map_channel = QWebChannel(self.map.page())
-        self.map_channel.registerObject("bridge", self.map_bridge)
-        self.map.page().setWebChannel(self.map_channel)
-        self.map.setHtml(self._map_html(), baseUrl="https://localhost/")
+        initial_lat = float(self.settings.value("latitude", 32.5))
+        initial_lon = float(self.settings.value("longitude", 53.7))
+        self.map = MapWidget(initial_lat, initial_lon)
+        self.map.locationSelected.connect(self.set_map_location)
         location_layout.addWidget(self.map)
 
         location_buttons = QHBoxLayout()
@@ -372,50 +369,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.results)
         self.setCentralWidget(root)
 
-    def _map_html(self) -> str:
-        saved_lat = self.settings.value("latitude", 32.5)
-        saved_lon = self.settings.value("longitude", 53.7)
-        return f"""
-<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<style>html,body,#map{{height:100%;margin:0}}</style>
-</head>
-<body>
-<div id="map"></div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
-<script>
-new QWebChannel(qt.webChannelTransport, function(channel) {{
-    window.bridge = channel.objects.bridge;
-    const lat = {float(saved_lat)};
-    const lon = {float(saved_lon)};
-    const map = L.map('map').setView([lat, lon], 13);
-    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-        maxZoom: 19,
-        attribution: '&copy; OpenStreetMap contributors'
-    }}).addTo(map);
-    let marker = L.marker([lat, lon]).addTo(map);
-    map.on('click', function(e) {{
-        marker.setLatLng(e.latlng);
-        window.bridge.locationSelected(e.latlng.lat, e.latlng.lng);
-    }});
-}});
-</script>
-</body>
-</html>
-"""
-
-    def set_map_location(self, lat: float, lon: float):
-        self.latitude.setText(f"{lat:.6f}")
-        self.longitude.setText(f"{lon:.6f}")
-        self.settings.setValue("latitude", lat)
-        self.settings.setValue("longitude", lon)
-        self.status.setText(f"Map location selected: {lat:.6f}, {lon:.6f}")
-
     def save_location(self):
         try:
             lat = float(self.latitude.text().strip())
@@ -438,7 +391,15 @@ new QWebChannel(qt.webChannelTransport, function(channel) {{
 
         self.settings.setValue("latitude", lat)
         self.settings.setValue("longitude", lon)
+        self.map.load_location(lat, lon)
         self.status.setText("Location saved. You can now find nearby stores.")
+
+    def set_map_location(self, lat: float, lon: float):
+        self.latitude.setText(f"{lat:.6f}")
+        self.longitude.setText(f"{lon:.6f}")
+        self.settings.setValue("latitude", lat)
+        self.settings.setValue("longitude", lon)
+        self.status.setText(f"Map location selected: {lat:.6f}, {lon:.6f}")
 
     def location_values(self) -> tuple[float, float] | None:
         try:
