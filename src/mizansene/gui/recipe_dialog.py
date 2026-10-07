@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from mizansene.crawler.intelligence import analyze_recipe, quantity_in_grams
 from mizansene.crawler.recipes import import_yummy_gastronomy
 from mizansene.database.store import ProductStore
 
@@ -100,6 +101,9 @@ class RecipeDialog(QDialog):
         check_button = QPushButton("Check recipe")
         check_button.clicked.connect(self.check_recipe)
         actions.addWidget(check_button)
+        analyze_button = QPushButton("Analyze ingredients")
+        analyze_button.clicked.connect(self.analyze_ingredients)
+        actions.addWidget(analyze_button)
         shopping_button = QPushButton("Smart shopping")
         shopping_button.clicked.connect(self.smart_shopping)
         actions.addWidget(shopping_button)
@@ -214,6 +218,24 @@ class RecipeDialog(QDialog):
                 "Recipe looks complete enough for shopping.",
             )
 
+    def analyze_ingredients(self):
+        items = analyze_recipe(self.ingredients.toPlainText())
+        if not items:
+            QMessageBox.information(self, "Recipe intelligence", "No ingredients were detected.")
+            return
+        lines = []
+        for item in items:
+            amount = f"{item.quantity:g} {item.unit}" if item.quantity is not None and item.unit else "quantity unknown"
+            grams = quantity_in_grams(item)
+            if grams is not None:
+                amount += f" ({grams:g} g)"
+            lines.append(f"• {item.name} — {amount}")
+        QMessageBox.information(
+            self,
+            "Recipe intelligence",
+            "Structured ingredients:\n" + "\n".join(lines),
+        )
+
     def smart_shopping(self):
         raw = [line.strip() for line in self.ingredients.toPlainText().splitlines()]
         ingredients = [line for line in raw if line and len(line) > 1]
@@ -224,18 +246,39 @@ class RecipeDialog(QDialog):
                 "This recipe has no ingredients yet.",
             )
             return
-        suggestions = "\n".join(f"☐ {item}" for item in ingredients)
+        inventory = {
+            " ".join(row["name"].casefold().split()): float(row["quantity_grams"])
+            for row in self.store.list_inventory()
+        }
+        parsed = analyze_recipe(self.ingredients.toPlainText())
+        lines = []
+        for item in parsed:
+            required = quantity_in_grams(item)
+            available = inventory.get(" ".join(item.name.casefold().split()), 0.0)
+            if required is None:
+                lines.append(f"⚠ {item.name} — quantity needs review")
+            elif available >= required:
+                lines.append(f"✓ {item.name} — enough ({available:g} g / {required:g} g)")
+            else:
+                lines.append(f"☐ {item.name} — need {required - available:g} g more")
+        suggestions = "\n".join(lines)
         box = QMessageBox(self)
         box.setWindowTitle("Smart shopping list")
-        box.setText("Ingredients detected from this recipe:")
+        box.setText("Inventory-aware recipe check:")
         box.setInformativeText(suggestions)
         box.exec()
-        if self.search_callback:
+        missing = [
+            item.name
+            for item in parsed
+            if quantity_in_grams(item) is None
+            or inventory.get(" ".join(item.name.casefold().split()), 0.0) < (quantity_in_grams(item) or 0)
+        ]
+        if self.search_callback and missing:
             choice, ok = QInputDialog.getItem(
                 self,
-                "Find ingredient",
+                "Find missing ingredient",
                 "Choose an ingredient to search in Okala:",
-                ingredients,
+                missing,
                 0,
                 False,
             )
