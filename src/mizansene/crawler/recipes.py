@@ -113,6 +113,8 @@ def import_yummy_gastronomy(
                 description = ((details or {}).get("description") or "").strip()
 
             ingredients, instructions = _description_sections(description)
+            if not ingredients and not instructions:
+                continue
             save_recipe(
                 name=title,
                 ingredients=ingredients,
