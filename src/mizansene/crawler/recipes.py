@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from typing import Callable
 
 YUMMY_GASTRONOMY_URL = "https://www.youtube.com/c/YummyGastronomy"
