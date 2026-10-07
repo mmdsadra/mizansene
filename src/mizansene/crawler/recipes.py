@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Callable
 
 YUMMY_GASTRONOMY_URL = "https://www.youtube.com/c/YummyGastronomy"
@@ -83,6 +84,9 @@ def import_yummy_gastronomy(
         "extract_flat": not full_metadata,
         "ignoreerrors": True,
     }
+    browser = os.getenv("YOUTUBE_COOKIES_FROM_BROWSER", "").strip()
+    if browser:
+        options["cookiesfrombrowser"] = (browser,)
     imported = 0
     with YoutubeDL(options) as ydl:
         channel = ydl.extract_info(YUMMY_GASTRONOMY_URL, download=False)
