@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import httpx
 from PySide6.QtCore import QSettings, Qt, QThread, Signal
@@ -27,18 +28,42 @@ from mizansene.crawler.recipes import ingredients_for
 from mizansene.crawler.search import extract_products, rank_products
 from mizansene.crawler.stores import extract_stores
 from mizansene.database.store import ProductStore
+from mizansene.gui.recipe_dialog import RecipeDialog
 
 FOOD_CATEGORIES = [
-    ("groceries", 1461),
-    ("dairy-products", 1462),
-    ("proteins", 1463),
-    ("canned-ready-food", 1464),
-    ("beverages", 1465),
-    ("breakfast-goods", 1466),
-    ("nuts-sweets", 1468),
-    ("spices", 1469),
-    ("fruits-vegetables", 1470),
+    ("groceries", 1461, "Groceries"),
+    ("dairy-products", 1462, "Dairy"),
+    ("proteins", 1463, "Protein"),
+    ("canned-ready-food", 1464, "Canned & ready food"),
+    ("beverages", 1465, "Beverages"),
+    ("breakfast-goods", 1466, "Breakfast"),
+    ("nuts-sweets", 1468, "Nuts & sweets"),
+    ("spices", 1469, "Spices"),
+    ("fruits-vegetables", 1470, "Fruit & vegetables"),
 ]
+
+
+def categories_for_query(query: str, selected: str) -> list[tuple[str, int, str]]:
+    if selected != "__smart__":
+        return [item for item in FOOD_CATEGORIES if item[0] == selected]
+
+    text = query.casefold()
+    groups = {
+        "dairy-products": ("شیر", "ماست", "پنیر", "خامه", "کره"),
+        "proteins": ("مرغ", "گوشت", "ماهی", "تن", "تخم مرغ", "تخم‌مرغ"),
+        "canned-ready-food": ("کنسرو", "رب", "ماکارونی", "نودل"),
+        "beverages": ("نوشابه", "آب", "آبمیوه", "قهوه", "چای"),
+        "breakfast-goods": ("عسل", "مربا", "ارده", "صبحانه"),
+        "nuts-sweets": ("آجیل", "شکلات", "بیسکویت", "کیک", "شیرینی"),
+        "spices": ("ادویه", "نمک", "فلفل", "زردچوبه"),
+        "fruits-vegetables": ("گوجه", "پیاز", "سیب", "سبزی", "میوه", "سیب زمینی"),
+    }
+    for slug, terms in groups.items():
+        if any(term in text for term in terms):
+            return [item for item in FOOD_CATEGORIES if item[0] == slug]
+
+    # The first three are a deliberately small, cheap first pass.
+    return FOOD_CATEGORIES[:3]
 
 
 class SearchWorker(QThread):
@@ -46,23 +71,20 @@ class SearchWorker(QThread):
     finished = Signal(list)
     failed = Signal(str)
 
-    def __init__(self, query: str, store_id: int | None):
+    def __init__(self, query: str, store_id: int, categories):
         super().__init__()
         self.query = query
         self.store_id = store_id
+        self.categories = categories
 
     def _rank(self, products):
         ingredients = ingredients_for(self.query)
         terms = ingredients or [self.query]
         if ingredients:
-            ranked: list[tuple[int, object]] = []
+            ranked = []
             for product in products:
                 name = product.name.casefold()
-                score = sum(
-                    1
-                    for ingredient in terms
-                    if ingredient.casefold() in name
-                )
+                score = sum(1 for ingredient in terms if ingredient.casefold() in name)
                 if score:
                     ranked.append((score, product))
             return [
@@ -76,22 +98,13 @@ class SearchWorker(QThread):
         return rank_products(products, self.query)
 
     def run(self):
-        if not self.store_id:
-            self.failed.emit("Select an Okala store before searching.")
-            return
-
         products_by_id = {}
         try:
-            # Three requests at a time keeps the UI responsive while avoiding
-            # the long 9-category serial wait. Each completed category is
-            # emitted immediately, so results appear progressively.
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-
             def fetch_category(slug):
                 client = OkalaClient(
                     token=OKALA_TOKEN,
                     cache_dir=CACHE_DIR,
-                    request_delay=0.15,
+                    request_delay=0.1,
                 )
                 try:
                     payload = client.store_category_available(self.store_id, slug)
@@ -104,23 +117,17 @@ class SearchWorker(QThread):
                 finally:
                     client.close()
 
-            with ThreadPoolExecutor(max_workers=3) as executor:
-                futures = [
-                    executor.submit(fetch_category, slug)
-                    for slug, _ in FOOD_CATEGORIES
-                ]
+            with ThreadPoolExecutor(max_workers=min(3, len(self.categories))) as executor:
+                futures = [executor.submit(fetch_category, item[0]) for item in self.categories]
                 for future in as_completed(futures):
                     for product in future.result():
                         products_by_id.setdefault(product.id, product)
-                    ranked = self._rank(list(products_by_id.values()))
-                    self.batch.emit(ranked[:60])
+                    self.batch.emit(self._rank(list(products_by_id.values()))[:30])
 
-            final = self._rank(list(products_by_id.values()))
-            self.finished.emit(final[:60])
-        except OkalaError as exc:
-            self.failed.emit(str(exc))
-        except ValueError as exc:
+            self.finished.emit(self._rank(list(products_by_id.values()))[:30])
+        except (OkalaError, ValueError) as exc:
             self.failed.emit(f"Search failed: {exc}")
+
 
 class StoreWorker(QThread):
     finished = Signal(list)
@@ -128,8 +135,7 @@ class StoreWorker(QThread):
 
     def __init__(self, lat: float, lon: float):
         super().__init__()
-        self.lat = lat
-        self.lon = lon
+        self.lat, self.lon = lat, lon
 
     def run(self):
         client = OkalaClient(token=OKALA_TOKEN, cache_dir=CACHE_DIR)
@@ -146,77 +152,49 @@ class ProductItem(QWidget):
     def __init__(self, product):
         super().__init__()
         layout = QHBoxLayout(self)
-        image = QLabel("No image")
-        image.setFixedSize(96, 96)
+        layout.setContentsMargins(8, 8, 8, 8)
+
+        image = QLabel("Image")
+        image.setFixedSize(72, 72)
         image.setAlignment(Qt.AlignCenter)
-        image.setStyleSheet("border: 1px solid #ddd;")
-        if product.image_url:
-            response = None
-            try:
-                response = httpx.get(product.image_url, timeout=8)
-                response.raise_for_status()
-                pixmap = QPixmap()
-                if pixmap.loadFromData(response.content):
-                    image.setPixmap(
-                        pixmap.scaled(
-                            96,
-                            96,
-                            Qt.KeepAspectRatio,
-                            Qt.SmoothTransformation,
-                        )
-                    )
-            except httpx.HTTPError:
-                pass
+        image.setStyleSheet("border: 1px solid #ddd; color: #888;")
         layout.addWidget(image)
 
         text = QVBoxLayout()
         name = QLabel(product.name)
         name.setWordWrap(True)
-        name.setStyleSheet("font-size: 15px; font-weight: 600;")
+        name.setStyleSheet("font-size: 14px; font-weight: 600;")
         text.addWidget(name)
+
         if product.price is not None:
-            text.addWidget(QLabel(f"{product.price:,} تومان"))
+            price_row = QHBoxLayout()
+            if (
+                product.original_price is not None
+                and product.original_price > product.price
+            ):
+                old = QLabel(f"<s>{product.original_price:,}</s> تومان")
+                old.setStyleSheet("color: #888;")
+                price_row.addWidget(old)
+            current = QLabel(f"{product.price:,} تومان")
+            current.setStyleSheet("font-weight: 600;")
+            price_row.addWidget(current)
+            if product.discount_percent:
+                discount = QLabel(f"{product.discount_percent:g}% تخفیف")
+                discount.setStyleSheet("font-weight: 700;")
+                price_row.addWidget(discount)
+            price_row.addStretch()
+            text.addLayout(price_row)
+
         if product.available is True:
             text.addWidget(QLabel("موجود"))
         elif product.available is False:
             text.addWidget(QLabel("ناموجود"))
+
         if product.url:
             button = QPushButton("Open in Okala")
             button.clicked.connect(lambda: webbrowser.open(product.url))
             text.addWidget(button)
         layout.addLayout(text)
-
-
-
-class MapTileWorker(QThread):
-    tiles_ready = Signal(object)
-
-    def __init__(self, lat: float, lon: float, zoom: int = 13):
-        super().__init__()
-        self.lat, self.lon, self.zoom = lat, lon, zoom
-
-    def run(self):
-        center_x, center_y = _latlon_to_world(self.lat, self.lon, self.zoom)
-        tiles = {}
-        max_tile = 2**self.zoom
-        tx0, ty0 = math.floor(center_x) - 2, math.floor(center_y) - 2
-        client = httpx.Client(timeout=8, headers={'User-Agent': 'Mizansene/0.1'})
-        try:
-            for tx in range(tx0, tx0 + 5):
-                for ty in range(ty0, ty0 + 5):
-                    if ty < 0 or ty >= max_tile:
-                        continue
-                    url = f'https://tile.openstreetmap.org/{self.zoom}/{tx % max_tile}/{ty}.png'
-                    response = client.get(url)
-                    response.raise_for_status()
-                    pixmap = QPixmap()
-                    if pixmap.loadFromData(response.content):
-                        tiles[(tx, ty)] = pixmap
-        except httpx.HTTPError:
-            tiles = {}
-        finally:
-            client.close()
-        self.tiles_ready.emit({'tiles': tiles, 'center_px': (center_x * 256, center_y * 256)})
 
 
 def _latlon_to_world(lat: float, lon: float, zoom: int) -> tuple[float, float]:
@@ -235,172 +213,264 @@ def _world_to_latlon(x: float, y: float, zoom: int) -> tuple[float, float]:
     return math.degrees(math.atan(math.sinh(n))), lon
 
 
+class MapTileWorker(QThread):
+    tiles_ready = Signal(object)
+
+    def __init__(self, center_x: float, center_y: float, zoom: int):
+        super().__init__()
+        self.center_x, self.center_y, self.zoom = center_x, center_y, zoom
+
+    def run(self):
+        tiles = {}
+        max_tile = 2**self.zoom
+        tx0, ty0 = math.floor(self.center_x / 256) - 1, math.floor(self.center_y / 256) - 1
+        client = httpx.Client(timeout=5, headers={"User-Agent": "Mizansene/0.1"})
+        try:
+            for tx in range(tx0, tx0 + 3):
+                for ty in range(ty0, ty0 + 3):
+                    if ty < 0 or ty >= max_tile:
+                        continue
+                    url = f"https://tile.openstreetmap.org/{self.zoom}/{tx % max_tile}/{ty}.png"
+                    response = client.get(url)
+                    response.raise_for_status()
+                    pixmap = QPixmap()
+                    if pixmap.loadFromData(response.content):
+                        tiles[(tx, ty)] = pixmap
+        except httpx.HTTPError:
+            pass
+        finally:
+            client.close()
+        self.tiles_ready.emit(tiles)
+
+
 class MapWidget(QWidget):
     locationSelected = Signal(float, float)
 
     def __init__(self, lat: float, lon: float, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(280)
-        self.zoom, self.lat, self.lon = 13, lat, lon
-        self.tiles, self.center_px, self.tile_worker = {}, (0, 0), None
-        self.load_location(lat, lon)
+        self.setMinimumHeight(200)
+        self.zoom = 13
+        self.lat, self.lon = lat, lon
+        self.tiles = {}
+        self.center_world = _latlon_to_world(lat, lon, self.zoom)
+        self.tile_worker = None
+        self.drag_start = None
+        self._load_tiles()
 
-    def load_location(self, lat: float, lon: float):
-        self.lat, self.lon, self.tiles = lat, lon, {}
+    def _load_tiles(self):
+        center_x, center_y = self.center_world
+        self.tiles = {}
         self.update()
-        self.tile_worker = MapTileWorker(lat, lon, self.zoom)
+        self.tile_worker = MapTileWorker(center_x * 256, center_y * 256, self.zoom)
         self.tile_worker.tiles_ready.connect(self._tiles_loaded)
         self.tile_worker.start()
 
-    def _tiles_loaded(self, result):
-        self.tiles, self.center_px = result['tiles'], result['center_px']
+    def set_center(self, lat: float, lon: float, emit=True):
+        self.lat, self.lon = lat, lon
+        self.center_world = _latlon_to_world(lat, lon, self.zoom)
+        self._load_tiles()
+        if emit:
+            self.locationSelected.emit(lat, lon)
+
+    def _tiles_loaded(self, tiles):
+        self.tiles = tiles
         self.update()
+
+    def zoom_by(self, delta: int):
+        new_zoom = max(4, min(18, self.zoom + delta))
+        if new_zoom == self.zoom:
+            return
+        self.zoom = new_zoom
+        self.center_world = _latlon_to_world(self.lat, self.lon, self.zoom)
+        self._load_tiles()
+
+    def wheelEvent(self, event):
+        self.zoom_by(1 if event.angleDelta().y() > 0 else -1)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_start = event.position()
+            self.setCursor(Qt.ClosedHandCursor)
+
+    def mouseMoveEvent(self, event):
+        if self.drag_start is None:
+            return
+        dx = event.position().x() - self.drag_start.x()
+        dy = event.position().y() - self.drag_start.y()
+        cx, cy = self.center_world
+        self.center_world = (cx - dx / 256, cy - dy / 256)
+        self.drag_start = event.position()
+        self.lat, self.lon = _world_to_latlon(*self.center_world, self.zoom)
+        self.update()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() != Qt.LeftButton:
+            return
+        self.setCursor(Qt.ArrowCursor)
+        if self.drag_start is not None:
+            self.locationSelected.emit(self.lat, self.lon)
+        self.drag_start = None
+        self._load_tiles()
 
     def paintEvent(self, _event):
         painter = QPainter(self)
         painter.fillRect(self.rect(), Qt.lightGray)
-        if not self.tiles:
-            painter.drawText(self.rect(), Qt.AlignCenter, 'Loading map…')
-            return
-        origin_x = self.center_px[0] - self.width() / 2
-        origin_y = self.center_px[1] - self.height() / 2
+        origin_x = self.center_world[0] * 256 - self.width() / 2
+        origin_y = self.center_world[1] * 256 - self.height() / 2
         for (tx, ty), pixmap in self.tiles.items():
             painter.drawPixmap(int(tx * 256 - origin_x), int(ty * 256 - origin_y), pixmap)
-        marker_x, marker_y = self.center_px[0] - origin_x, self.center_px[1] - origin_y
-        painter.setBrush(Qt.red)
-        painter.drawEllipse(int(marker_x - 6), int(marker_y - 6), 12, 12)
-        painter.drawText(12, self.height() - 12, 'Click the map to choose a location')
 
-    def mousePressEvent(self, event):
-        if event.button() != Qt.LeftButton:
-            return
-        origin_x = self.center_px[0] - self.width() / 2
-        origin_y = self.center_px[1] - self.height() / 2
-        lat, lon = _world_to_latlon((origin_x + event.position().x()) / 256, (origin_y + event.position().y()) / 256, self.zoom)
-        self.load_location(lat, lon)
-        self.locationSelected.emit(lat, lon)
+        cx, cy = self.width() // 2, self.height() // 2
+        painter.setBrush(Qt.red)
+        painter.drawEllipse(cx - 6, cy - 6, 12, 12)
+        painter.drawText(8, self.height() - 8, "© OpenStreetMap contributors")
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Mizansene — Okala food finder")
-        self.resize(860, 820)
+        self.resize(900, 760)
         self.store = ProductStore(DB_PATH)
         self.worker = None
         self.store_worker = None
         self.current_products = {}
+        self.search_categories = []
+        self.loaded_category_count = 0
         self.settings = QSettings("Mizansene", "Mizansene")
 
         root = QWidget()
         layout = QVBoxLayout(root)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(8)
 
-        title = QLabel("What do you want to cook or buy?")
-        title.setStyleSheet("font-size: 22px; font-weight: 600;")
-        layout.addWidget(title)
+        title_row = QHBoxLayout()
+        title = QLabel("Mizansene")
+        title.setStyleSheet("font-size: 22px; font-weight: 700;")
+        title_row.addWidget(title)
+        title_row.addStretch()
+        recipes = QPushButton("📖 Recipe notebook")
+        recipes.clicked.connect(self.open_recipes)
+        title_row.addWidget(recipes)
+        layout.addLayout(title_row)
 
         location_box = QGroupBox("Location")
         location_layout = QVBoxLayout(location_box)
+        coordinate_row = QHBoxLayout()
         self.latitude = QLineEdit(str(self.settings.value("latitude", "")))
         self.longitude = QLineEdit(str(self.settings.value("longitude", "")))
-        self.latitude.setPlaceholderText("Latitude, e.g. 32.6613")
-        self.longitude.setPlaceholderText("Longitude, e.g. 51.6804")
-
-        coordinate_row = QHBoxLayout()
+        self.latitude.setPlaceholderText("Latitude")
+        self.longitude.setPlaceholderText("Longitude")
         coordinate_row.addWidget(self.latitude)
         coordinate_row.addWidget(self.longitude)
         location_layout.addLayout(coordinate_row)
+
+        map_row = QHBoxLayout()
+        self.map_toggle = QPushButton("📍 Choose on map")
+        self.map_toggle.setCheckable(True)
+        self.map_toggle.toggled.connect(self.toggle_map)
+        map_row.addWidget(self.map_toggle)
+        save_location = QPushButton("Save")
+        save_location.clicked.connect(self.save_location)
+        map_row.addWidget(save_location)
+        find_stores = QPushButton("Find nearby stores")
+        find_stores.clicked.connect(self.discover_stores)
+        map_row.addWidget(find_stores)
+        location_layout.addLayout(map_row)
 
         initial_lat = float(self.settings.value("latitude", 32.5))
         initial_lon = float(self.settings.value("longitude", 53.7))
         self.map = MapWidget(initial_lat, initial_lon)
         self.map.locationSelected.connect(self.set_map_location)
+        self.map.hide()
         location_layout.addWidget(self.map)
-
-        location_buttons = QHBoxLayout()
-        save_location = QPushButton("Save location")
-        save_location.clicked.connect(self.save_location)
-        location_buttons.addWidget(save_location)
-        find_stores = QPushButton("Find nearby stores")
-        find_stores.clicked.connect(self.discover_stores)
-        location_buttons.addWidget(find_stores)
-        location_layout.addLayout(location_buttons)
         layout.addWidget(location_box)
 
-        row = QHBoxLayout()
+        search_row = QHBoxLayout()
         self.search = QLineEdit()
         self.search.setPlaceholderText("مثلاً: عدس پلو، شیر، مرغ، رب گوجه")
         self.search.returnPressed.connect(self.start_search)
-        row.addWidget(self.search)
+        search_row.addWidget(self.search, 3)
+
+        self.category_combo = QComboBox()
+        self.category_combo.addItem("Smart category", "__smart__")
+        for slug, _, label in FOOD_CATEGORIES:
+            self.category_combo.addItem(label, slug)
+        search_row.addWidget(self.category_combo, 1)
 
         self.store_combo = QComboBox()
-        self.store_combo.setMinimumWidth(280)
+        self.store_combo.setMinimumWidth(220)
         self.store_combo.addItem("Choose a nearby store", None)
         self.store_combo.currentIndexChanged.connect(self.store_changed)
-        row.addWidget(self.store_combo)
+        search_row.addWidget(self.store_combo, 1)
 
-        button = QPushButton("Search")
-        button.clicked.connect(self.start_search)
-        row.addWidget(button)
-        layout.addLayout(row)
+        search_button = QPushButton("Search")
+        search_button.clicked.connect(self.start_search)
+        search_row.addWidget(search_button)
+        layout.addLayout(search_row)
 
         manual_row = QHBoxLayout()
-        manual_row.addWidget(QLabel("Manual store ID:"))
+        manual_row.addWidget(QLabel("Store ID:"))
         self.manual_store = QLineEdit()
         self.manual_store.setPlaceholderText("Optional")
         manual_row.addWidget(self.manual_store)
         use_manual = QPushButton("Use ID")
         use_manual.clicked.connect(self.use_manual_store)
         manual_row.addWidget(use_manual)
+        self.selected_store_label = QLabel("Selected: —")
+        manual_row.addWidget(self.selected_store_label)
         layout.addLayout(manual_row)
-
-        self.selected_store_label = QLabel("Selected store ID: —")
-        layout.addWidget(self.selected_store_label)
 
         recent = self.store.recent_searches()
         history = QLabel("Recent: " + (" • ".join(recent) if recent else "none"))
         history.setWordWrap(True)
         layout.addWidget(history)
 
-        self.status = QLabel(
-            "Enter your location, find nearby stores, select one, then search."
-        )
+        self.status = QLabel("Choose a location, store and search.")
         layout.addWidget(self.status)
+
         self.results = QListWidget()
-        layout.addWidget(self.results)
+        self.results.setUniformItemSizes(False)
+        layout.addWidget(self.results, 1)
+
+        self.load_more = QPushButton("Load more categories")
+        self.load_more.clicked.connect(self.load_more_categories)
+        self.load_more.hide()
+        layout.addWidget(self.load_more)
+
         self.setCentralWidget(root)
 
+    def toggle_map(self, visible: bool):
+        self.map.setVisible(visible)
+        self.map_toggle.setText("📍 Hide map" if visible else "📍 Choose on map")
+        if visible:
+            location = self.location_values()
+            if location:
+                self.map.set_center(*location, emit=False)
+
+    def open_recipes(self):
+        dialog = RecipeDialog(self.store, self)
+        dialog.exec()
+
     def save_location(self):
-        try:
-            lat = float(self.latitude.text().strip())
-            lon = float(self.longitude.text().strip())
-        except ValueError:
-            QMessageBox.warning(
-                self,
-                "Invalid location",
-                "Latitude and longitude must be decimal numbers.",
-            )
+        location = self.location_values()
+        if location is None:
+            QMessageBox.warning(self, "Invalid location", "Enter valid decimal latitude and longitude.")
             return
-
-        if not -90 <= lat <= 90 or not -180 <= lon <= 180:
-            QMessageBox.warning(
-                self,
-                "Invalid location",
-                "Latitude must be between -90 and 90 and longitude between -180 and 180.",
-            )
-            return
-
+        lat, lon = location
         self.settings.setValue("latitude", lat)
         self.settings.setValue("longitude", lon)
-        self.map.load_location(lat, lon)
-        self.status.setText("Location saved. You can now find nearby stores.")
+        self.map.set_center(lat, lon, emit=False)
+        self.status.setText("Location saved.")
 
     def set_map_location(self, lat: float, lon: float):
         self.latitude.setText(f"{lat:.6f}")
         self.longitude.setText(f"{lon:.6f}")
         self.settings.setValue("latitude", lat)
         self.settings.setValue("longitude", lon)
-        self.status.setText(f"Map location selected: {lat:.6f}, {lon:.6f}")
+        self.status.setText(f"Map location: {lat:.5f}, {lon:.5f}")
 
-    def location_values(self) -> tuple[float, float] | None:
+    def location_values(self):
         try:
             lat = float(self.latitude.text().strip())
             lon = float(self.longitude.text().strip())
@@ -413,19 +483,13 @@ class MainWindow(QMainWindow):
     def discover_stores(self):
         location = self.location_values()
         if location is None:
-            QMessageBox.warning(
-                self,
-                "Set location",
-                "Enter a valid latitude and longitude first.",
-            )
+            QMessageBox.warning(self, "Set location", "Enter a valid latitude and longitude first.")
             return
-
         self.save_location()
         self.status.setText("Finding nearby Okala stores…")
         self.store_combo.clear()
         self.store_combo.addItem("Finding stores…", None)
         self.store_combo.setEnabled(False)
-        self.manual_store.clear()
         self.store_worker = StoreWorker(*location)
         self.store_worker.finished.connect(self.show_stores)
         self.store_worker.failed.connect(self.show_error)
@@ -437,85 +501,91 @@ class MainWindow(QMainWindow):
         self.store_combo.addItem("Choose a nearby store", None)
         for store_id, name in stores:
             self.store_combo.addItem(f"{name} ({store_id})", store_id)
-
         if stores:
             self.store_combo.setCurrentIndex(1)
-            self.status.setText(
-                f"Found {len(stores)} nearby stores. Closest store selected; you can change it."
-            )
+            self.status.setText(f"Found {len(stores)} nearby stores.")
         else:
             self.status.setText("No nearby Okala stores were returned.")
 
     def store_changed(self, _index: int):
         store_id = self.store_combo.currentData()
         if store_id is None:
-            self.selected_store_label.setText("Selected store ID: —")
-            return
-        self.manual_store.clear()
-        self.selected_store_label.setText(f"Selected store ID: {int(store_id)}")
+            self.selected_store_label.setText("Selected: —")
+        else:
+            self.manual_store.clear()
+            self.selected_store_label.setText(f"Selected: {int(store_id)}")
 
     def use_manual_store(self):
-        raw = self.manual_store.text().strip()
         try:
-            store_id = int(raw)
+            store_id = int(self.manual_store.text().strip())
         except ValueError:
             QMessageBox.warning(self, "Invalid store ID", "Store ID must be a number.")
             return
         self.store_combo.setCurrentIndex(0)
-        self.selected_store_label.setText(f"Selected store ID: {store_id}")
-        self.status.setText(f"Using manually entered Okala store {store_id}.")
+        self.selected_store_label.setText(f"Selected: {store_id}")
+        self.status.setText(f"Using store {store_id}.")
 
-    def selected_store_id(self) -> int | None:
-        combo_value = self.store_combo.currentData()
-        if combo_value is not None:
-            return int(combo_value)
-
+    def selected_store_id(self):
+        value = self.store_combo.currentData()
+        if value is not None:
+            return int(value)
         raw = self.manual_store.text().strip()
-        if not raw:
-            return None
-        try:
-            return int(raw)
-        except ValueError:
-            return None
+        return int(raw) if raw.isdigit() else None
 
     def start_search(self):
         query = self.search.text().strip()
+        store_id = self.selected_store_id()
         if not query:
             return
-
-        store_id = self.selected_store_id()
         if store_id is None:
-            QMessageBox.information(
-                self,
-                "Choose a store",
-                "Find nearby stores and select one first, or enter a store ID manually.",
-            )
+            QMessageBox.information(self, "Choose a store", "Select or enter a store ID first.")
             return
 
         self.store.add_search(query)
-        self.status.setText(f"Searching store {store_id} for available products…")
+        self.search_categories = categories_for_query(query, self.category_combo.currentData())
+        self.loaded_category_count = min(3, len(self.search_categories))
         self.results.clear()
-        self.worker = SearchWorker(query, store_id)
+        self.current_products.clear()
+        self.load_more.hide()
+        self._run_categories(self.search_categories[: self.loaded_category_count], store_id)
+        self.load_more.setVisible(self.loaded_category_count < len(self.search_categories))
+
+    def _run_categories(self, categories, store_id):
+        labels = ", ".join(item[2] for item in categories)
+        self.status.setText(f"Searching {labels}…")
+        self.worker = SearchWorker(self.search.text().strip(), store_id, categories)
         self.worker.batch.connect(self.show_batch)
         self.worker.finished.connect(self.show_results)
         self.worker.failed.connect(self.show_error)
         self.worker.start()
 
     def show_batch(self, products):
-        self._render_products(products, clear=True)
-        self.status.setText(f"Loading… {len(products)} matching products found so far.")
+        self._render_products(products)
+        self.status.setText(f"Loaded {len(products)} matches. More results can be loaded below.")
 
     def show_results(self, products):
-        self._render_products(products, clear=True)
-        if not products:
-            self.status.setText("No matching available products found in this store.")
-            return
-        self.status.setText(f"Found {len(products)} available matches.")
+        self._render_products(products)
         self.store.save_products(products)
+        if not products:
+            self.status.setText("No matching available products found in the selected category.")
+        else:
+            self.status.setText(f"Loaded {len(products)} matching products.")
+        self.load_more.setVisible(self.loaded_category_count < len(self.search_categories))
 
-    def _render_products(self, products, *, clear: bool):
-        if clear:
-            self.results.clear()
+    def load_more_categories(self):
+        if self.worker and self.worker.isRunning():
+            return
+        store_id = self.selected_store_id()
+        if store_id is None:
+            return
+        next_count = min(self.loaded_category_count + 3, len(self.search_categories))
+        categories = self.search_categories[self.loaded_category_count : next_count]
+        self.loaded_category_count = next_count
+        self._run_categories(categories, store_id)
+        self.load_more.setVisible(self.loaded_category_count < len(self.search_categories))
+
+    def _render_products(self, products):
+        self.results.clear()
         self.current_products = {product.id: product for product in products}
         for product in products:
             item = QListWidgetItem()
