@@ -3,6 +3,7 @@ from __future__ import annotations
 import webbrowser
 
 from PySide6.QtCore import QThread, Signal
+from yt_dlp.utils import DownloadError
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -38,7 +39,7 @@ class RecipeImportWorker(QThread):
                 full_metadata=self.full_metadata,
             )
             self.finished.emit(count)
-        except (RuntimeError, OSError) as exc:
+        except (DownloadError, RuntimeError, OSError) as exc:
             self.failed.emit(str(exc))
 
 
