@@ -3,7 +3,7 @@ from __future__ import annotations
 import webbrowser
 
 import httpx
-from PySide6.QtCore import QSettings, QThread, Qt, Signal
+from PySide6.QtCore import QSettings, Qt, QThread, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -27,7 +27,6 @@ from mizansene.crawler.recipes import ingredients_for
 from mizansene.crawler.search import extract_products, rank_products
 from mizansene.crawler.stores import extract_stores
 from mizansene.database.store import ProductStore
-
 
 FOOD_CATEGORIES = [
     ("groceries", 1461),
