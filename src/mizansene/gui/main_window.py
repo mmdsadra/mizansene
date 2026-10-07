@@ -6,14 +6,16 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMainWindow, QMessageBox, QPushButton, QVBoxLayout, QWidget,
+    QMainWindow, QMessageBox, QPushButton, QComboBox, QVBoxLayout, QWidget,
 )
 
 from mizansene.config import (
     CACHE_DIR, DB_PATH, OKALA_LAT, OKALA_LON, OKALA_STORE_ID, OKALA_TOKEN
 )
 from mizansene.crawler.client import OkalaClient, OkalaError
+from mizansene.crawler.recipes import ingredients_for
 from mizansene.crawler.search import extract_products, rank_products
+from mizansene.crawler.stores import extract_stores
 from mizansene.database.store import ProductStore
 
 
@@ -36,16 +38,52 @@ class SearchWorker(QThread):
     def run(self):
         client = OkalaClient(token=OKALA_TOKEN, cache_dir=CACHE_DIR)
         try:
+            ingredients = ingredients_for(self.query)
+            terms = ingredients or [self.query]
+
             if not self.store_id:
                 payload = client.nearby("groceries", OKALA_LAT, OKALA_LON)
-                products = rank_products(extract_products(payload), self.query)
+                products = extract_products(payload)
+                products = rank_products(products, self.query)
             else:
                 products = []
                 for slug, category_id in FOOD_CATEGORIES:
                     payload = client.store_category(self.store_id, slug, category_id)
                     products.extend(extract_products(payload, self.store_id))
-                products = rank_products(products, self.query)
-            self.finished.emit(products[:40])
+
+                # A recipe produces a useful combined shopping result. Products
+                # are scored against every ingredient and deduplicated by ID.
+                if ingredients:
+                    ranked: list[tuple[int, object]] = []
+                    for product in products:
+                        score = sum(
+                            1 for ingredient in terms
+                            if ingredient.casefold() in product.name.casefold()
+                        )
+                        if score:
+                            ranked.append((score, product))
+                    products = [p for _, p in sorted(
+                        ranked, key=lambda pair: (pair[0], -len(pair[1].name)), reverse=True
+                    )]
+                else:
+                    products = rank_products(products, self.query)
+
+            self.finished.emit(products[:60])
+        except OkalaError as exc:
+            self.failed.emit(str(exc))
+        finally:
+            client.close()
+
+
+class StoreWorker(QThread):
+    finished = Signal(list)
+    failed = Signal(str)
+
+    def run(self):
+        client = OkalaClient(token=OKALA_TOKEN, cache_dir=CACHE_DIR)
+        try:
+            payload = client.nearby("groceries", OKALA_LAT, OKALA_LON)
+            self.finished.emit(extract_stores(payload))
         except OkalaError as exc:
             self.failed.emit(str(exc))
         finally:
@@ -92,12 +130,14 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Mizansene — Okala food finder")
-        self.resize(820, 720)
+        self.resize(860, 760)
         self.store = ProductStore(DB_PATH)
         self.worker = None
+        self.store_worker = None
 
         root = QWidget()
         layout = QVBoxLayout(root)
+
         title = QLabel("What do you want to cook or buy?")
         title.setStyleSheet("font-size: 22px; font-weight: 600;")
         layout.addWidget(title)
@@ -107,14 +147,27 @@ class MainWindow(QMainWindow):
         self.search.setPlaceholderText("مثلاً: عدس پلو، شیر، مرغ، رب گوجه")
         self.search.returnPressed.connect(self.start_search)
         row.addWidget(self.search)
-        self.store_id = QLineEdit(OKALA_STORE_ID or "")
-        self.store_id.setPlaceholderText("Okala store ID")
-        self.store_id.setMaximumWidth(170)
-        row.addWidget(self.store_id)
+
+        self.store_combo = QComboBox()
+        self.store_combo.setMinimumWidth(230)
+        self.store_combo.addItem("Use store ID manually", None)
+        if OKALA_STORE_ID:
+            self.store_combo.addItem(f"Configured store: {OKALA_STORE_ID}", int(OKALA_STORE_ID))
+            self.store_combo.setCurrentIndex(1)
+        row.addWidget(self.store_combo)
+
+        discover = QPushButton("Find nearby stores")
+        discover.clicked.connect(self.discover_stores)
+        row.addWidget(discover)
+
         button = QPushButton("Search")
         button.clicked.connect(self.start_search)
         row.addWidget(button)
         layout.addLayout(row)
+
+        self.manual_store = QLineEdit(OKALA_STORE_ID or "")
+        self.manual_store.setPlaceholderText("Or enter Okala store ID")
+        layout.addWidget(self.manual_store)
 
         recent = self.store.recent_searches()
         history = QLabel("Recent: " + (" • ".join(recent) if recent else "none"))
@@ -127,15 +180,37 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.results)
         self.setCentralWidget(root)
 
+    def selected_store_id(self) -> int | None:
+        combo_value = self.store_combo.currentData()
+        if combo_value is not None:
+            return int(combo_value)
+        raw = self.manual_store.text().strip()
+        return int(raw) if raw else None
+
+    def discover_stores(self):
+        self.status.setText("Finding nearby Okala stores…")
+        self.store_worker = StoreWorker()
+        self.store_worker.finished.connect(self.show_stores)
+        self.store_worker.failed.connect(self.show_error)
+        self.store_worker.start()
+
+    def show_stores(self, stores):
+        self.store_combo.clear()
+        self.store_combo.addItem("Choose a nearby store", None)
+        for store_id, name in stores:
+            self.store_combo.addItem(f"{name} ({store_id})", store_id)
+        self.status.setText(f"Found {len(stores)} stores.")
+
     def start_search(self):
         query = self.search.text().strip()
         if not query:
             return
         try:
-            store_id = int(self.store_id.text()) if self.store_id.text().strip() else None
+            store_id = self.selected_store_id()
         except ValueError:
             QMessageBox.warning(self, "Invalid store ID", "Store ID must be a number.")
             return
+
         self.store.add_search(query)
         self.status.setText("Searching Okala…")
         self.results.clear()
@@ -159,5 +234,5 @@ class MainWindow(QMainWindow):
             self.results.setItemWidget(item, widget)
 
     def show_error(self, message: str):
-        self.status.setText("Search failed.")
+        self.status.setText("Request failed.")
         QMessageBox.warning(self, "Okala error", message)
