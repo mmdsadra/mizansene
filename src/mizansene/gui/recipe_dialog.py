@@ -38,6 +38,7 @@ class RecipeImportWorker(QThread):
                 self.store.upsert_recipe,
                 progress=self.progress.emit,
                 full_metadata=self.full_metadata,
+                existing_urls=self.store.recipe_source_urls(),
             )
             self.finished.emit(count)
         except (DownloadError, RuntimeError, OSError) as exc:
@@ -110,7 +111,7 @@ class RecipeDialog(QDialog):
         import_button = QPushButton("Import Yummy Gastronomy")
         import_button.clicked.connect(self.import_yummy)
         actions.addWidget(import_button)
-        full_import_button = QPushButton("Full metadata")
+        full_import_button = QPushButton("Sync new Yummy recipes")
         full_import_button.clicked.connect(self.import_yummy_full)
         actions.addWidget(full_import_button)
         right.addLayout(actions)
@@ -296,7 +297,7 @@ class RecipeDialog(QDialog):
             return
         if full_metadata:
             self.progress.setText(
-                "Full metadata requires YOUTUBE_COOKIES_FROM_BROWSER "
+                "New-recipe sync uses YOUTUBE_COOKIES_FROM_BROWSER "
                 "(for example: chrome)."
             )
         else:
