@@ -293,8 +293,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
 
     def _map_html(self) -> str:
-        saved_lat = self.settings.value("latitude", 35.805851)
-        saved_lon = self.settings.value("longitude", 51.431311)
+        saved_lat = self.settings.value("latitude", 32.5)
+        saved_lon = self.settings.value("longitude", 53.7)
         return f"""
 <!doctype html>
 <html>
