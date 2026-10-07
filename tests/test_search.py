@@ -11,7 +11,12 @@ def test_extract_products_normalizes_okala_like_payload():
                 "imageUrl": "https://x/a.jpg",
                 "isAvailable": True,
             },
-            {"id": 2, "productName": "برنج", "sellingPrice": "900000", "isAvailable": False},
+            {
+                "id": 2,
+                "productName": "برنج",
+                "sellingPrice": "900000",
+                "isAvailable": False,
+            },
         ]
     }
     products = extract_products(payload, store_id=12)
