@@ -373,16 +373,28 @@ class MainWindow(QMainWindow):
         layout.setSpacing(8)
 
         title_row = QHBoxLayout()
-        title = QLabel("Mizansene")
-        title.setStyleSheet("font-size: 22px; font-weight: 700;")
-        title_row.addWidget(title)
+        self.title_label = QLabel("Mizansene")
+        self.title_label.setStyleSheet("font-size: 22px; font-weight: 700;")
+        title_row.addWidget(self.title_label)
         title_row.addStretch()
-        recipes = QPushButton("📖 Recipe notebook")
-        recipes.clicked.connect(self.open_recipes)
-        title_row.addWidget(recipes)
+        self.recipes_button = QPushButton("📖 Recipe notebook")
+        self.recipes_button.clicked.connect(self.open_recipes)
+        title_row.addWidget(self.recipes_button)
+        self.language_combo = QComboBox()
+        self.language_combo.addItem("فارسی", "fa")
+        self.language_combo.addItem("English", "en")
+        self.language_combo.addItem("Deutsch", "de")
+        self.language_combo.setCurrentIndex(
+            {"fa": 0, "en": 1, "de": 2}.get(
+                self.settings.value("language", "en"), 1
+            )
+        )
+        self.language_combo.currentIndexChanged.connect(self.change_language)
+        title_row.addWidget(self.language_combo)
         layout.addLayout(title_row)
 
-        location_box = QGroupBox("Location")
+        self.location_box = QGroupBox("Location")
+        location_box = self.location_box
         location_layout = QVBoxLayout(location_box)
         coordinate_row = QHBoxLayout()
         self.latitude = QLineEdit(str(self.settings.value("latitude", "")))
@@ -406,12 +418,12 @@ class MainWindow(QMainWindow):
         zoom_in.setFixedWidth(34)
         zoom_in.clicked.connect(lambda: self.map.zoom_by(1))
         map_row.addWidget(zoom_in)
-        save_location = QPushButton("Save")
-        save_location.clicked.connect(self.save_location)
-        map_row.addWidget(save_location)
-        find_stores = QPushButton("Find nearby stores")
-        find_stores.clicked.connect(self.discover_stores)
-        map_row.addWidget(find_stores)
+        self.save_location_button = QPushButton("Save")
+        self.save_location_button.clicked.connect(self.save_location)
+        map_row.addWidget(self.save_location_button)
+        self.find_stores_button = QPushButton("Find nearby stores")
+        self.find_stores_button.clicked.connect(self.discover_stores)
+        map_row.addWidget(self.find_stores_button)
         location_layout.addLayout(map_row)
 
         initial_lat = float(self.settings.value("latitude", 32.5))
@@ -428,6 +440,8 @@ class MainWindow(QMainWindow):
         self.search.returnPressed.connect(self.start_search)
         search_row.addWidget(self.search, 3)
 
+        self.search_button = QPushButton("Search")
+        self.search_button.clicked.connect(self.start_search)
         self.category_combo = QComboBox()
         self.category_combo.addItem("Smart category", "__smart__")
         for slug, _, label in FOOD_CATEGORIES:
@@ -440,9 +454,7 @@ class MainWindow(QMainWindow):
         self.store_combo.currentIndexChanged.connect(self.store_changed)
         search_row.addWidget(self.store_combo, 1)
 
-        search_button = QPushButton("Search")
-        search_button.clicked.connect(self.start_search)
-        search_row.addWidget(search_button)
+        search_row.addWidget(self.search_button)
         layout.addLayout(search_row)
 
         manual_row = QHBoxLayout()
@@ -450,17 +462,19 @@ class MainWindow(QMainWindow):
         self.manual_store = QLineEdit()
         self.manual_store.setPlaceholderText("Optional")
         manual_row.addWidget(self.manual_store)
-        use_manual = QPushButton("Use ID")
-        use_manual.clicked.connect(self.use_manual_store)
-        manual_row.addWidget(use_manual)
+        self.use_manual_button = QPushButton("Use ID")
+        self.use_manual_button.clicked.connect(self.use_manual_store)
+        manual_row.addWidget(self.use_manual_button)
         self.selected_store_label = QLabel("Selected: —")
         manual_row.addWidget(self.selected_store_label)
         layout.addLayout(manual_row)
 
-        recent = self.store.recent_searches()
-        history = QLabel("Recent: " + (" • ".join(recent) if recent else "none"))
-        history.setWordWrap(True)
-        layout.addWidget(history)
+        self.history_label = QLabel()
+        self.history_label.setWordWrap(True)
+        layout.addWidget(self.history_label)
+        self.clear_history_button = QPushButton("Clear search history")
+        self.clear_history_button.clicked.connect(self.clear_history)
+        layout.addWidget(self.clear_history_button)
 
         self.status = QLabel("Choose a location, store and search.")
         layout.addWidget(self.status)
@@ -475,6 +489,75 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.load_more)
 
         self.setCentralWidget(root)
+        self.apply_language(self.language_combo.currentData())
+
+    def change_language(self, index: int):
+        code = self.language_combo.itemData(index)
+        self.settings.setValue("language", code)
+        self.apply_language(code)
+
+    def apply_language(self, code: str):
+        texts = {
+            "en": {
+                "location": "Location",
+                "map": "📍 Choose on map",
+                "hide_map": "📍 Hide map",
+                "save": "Save",
+                "stores": "Find nearby stores",
+                "search": "Search",
+                "use_id": "Use ID",
+                "history": "Recent",
+                "none": "none",
+                "clear": "Clear search history",
+                "recipes": "📖 Recipe notebook",
+                "load_more": "Load more categories",
+            },
+            "fa": {
+                "location": "موقعیت",
+                "map": "📍 انتخاب روی نقشه",
+                "hide_map": "📍 بستن نقشه",
+                "save": "ذخیره",
+                "stores": "پیدا کردن فروشگاه‌های نزدیک",
+                "search": "جستجو",
+                "use_id": "استفاده از شناسه",
+                "history": "جستجوهای اخیر",
+                "none": "هیچ‌کدام",
+                "clear": "پاک کردن تاریخچه جستجو",
+                "recipes": "📖 دفترچه رسپی",
+                "load_more": "بارگذاری دسته‌های بیشتر",
+            },
+            "de": {
+                "location": "Standort",
+                "map": "📍 Auf Karte auswählen",
+                "hide_map": "📍 Karte schließen",
+                "save": "Speichern",
+                "stores": "Nahe Geschäfte finden",
+                "search": "Suchen",
+                "use_id": "ID verwenden",
+                "history": "Letzte Suchen",
+                "none": "keine",
+                "clear": "Suchverlauf löschen",
+                "recipes": "📖 Rezeptbuch",
+                "load_more": "Weitere Kategorien laden",
+            },
+        }[code]
+        self.location_box.setTitle(texts["location"])
+        self.map_toggle.setText(texts["hide_map"] if self.map_toggle.isChecked() else texts["map"])
+        self.save_location_button.setText(texts["save"])
+        self.find_stores_button.setText(texts["stores"])
+        self.search_button.setText(texts["search"])
+        self.use_manual_button.setText(texts["use_id"])
+        self.recipes_button.setText(texts["recipes"])
+        self.clear_history_button.setText(texts["clear"])
+        self.load_more.setText(texts["load_more"])
+        recent = self.store.recent_searches()
+        self.history_label.setText(
+            f"{texts['history']}: " + (" • ".join(recent) if recent else texts["none"])
+        )
+
+    def clear_history(self):
+        self.store.clear_search_history()
+        self.apply_language(self.language_combo.currentData())
 
     def toggle_map(self, visible: bool):
         self.map.setVisible(visible)
