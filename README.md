@@ -17,7 +17,11 @@ inventory, ranks matching products, keeps local history, and gives a store-speci
 - Product price, original price and discount percentage
 - Store-specific Okala product URLs
 - Editable local recipe notebook
-- Yummy Gastronomy YouTube metadata/description importer
+- Fast Yummy Gastronomy YouTube channel index importer
+- Optional full YouTube metadata import with local browser cookies
+- Recipe completeness checker + ingredient shopping suggestions
+- Persian / English / German UI
+- Search-history deletion
 - SQLite product/search/recipe history
 - Persian/English input
 - Unit tests + GitHub Actions
@@ -51,8 +55,15 @@ The **Recipe notebook** button opens an editable local cookbook. Recipes can be 
 edited, deleted, opened at their source URL, and imported from the Yummy Gastronomy
 YouTube channel.
 
-The importer stores video title, description, ingredients/instructions when recognizable,
-and the original YouTube URL. It does not download the video itself.
+The default importer stores the channel index quickly and does not make one network
+request per video. YouTube may require authentication for individual video metadata.
+For full metadata, set `YOUTUBE_COOKIES_FROM_BROWSER` to a browser name such as
+`chrome` or `firefox`, then use **Full metadata**. The app never uploads those
+cookies; yt-dlp reads them locally.
+
+The notebook also has a recipe checker and a shopping assistant. It extracts ingredient
+lines, flags missing quantities/instructions, builds a checklist, and can send a selected
+ingredient directly to the Okala search.
 
 ## Architecture
 
